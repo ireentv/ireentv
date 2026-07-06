@@ -22,17 +22,130 @@ export async function onRequest(context: { request: Request; env: any; params: a
   // Route 1: FETCH channels (equivalent to /api/channels in server.ts)
   if (pathname === "/api/channels") {
     try {
-      // 1. Fetch CricHD channels
+      // 1. Fetch CricHD channels (Now replaced with playlist_vip.m3u)
       let cricChannels: any[] = [];
       try {
         const response = await fetch(
-          "https://raw.githubusercontent.com/abusaeeidx/CricHd-playlists-Auto-Update-permanent/refs/heads/main/api.json"
+          "https://raw.githubusercontent.com/lotaji/playlist-vip/refs/heads/main/playlist_vip.m3u"
         );
         if (response.ok) {
-          cricChannels = await response.json();
+          const text = await response.text();
+          const lines = text.split(/\r?\n/);
+          let currentItem: any = null;
+          let channelIndex = 0;
+
+          const finalizeCurrentItem = () => {
+            if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
+              const urls = currentItem.urls;
+              currentItem.link = urls[0];
+              if (urls.length > 1) {
+                currentItem.link2 = urls[1];
+              }
+              if (urls.length > 2) {
+                currentItem.link3 = urls[2];
+              }
+
+              currentItem.id = currentItem.tvgId ? `crichd-m3u-${currentItem.tvgId}-${channelIndex}` : `crichd-m3u-${channelIndex}`;
+
+              if (!currentItem.logo) {
+                currentItem.logo = "https://images.unsplash.com/photo-1540747737956-378724044453?q=80&w=200&auto=format&fit=crop";
+              }
+
+              currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
+              currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
+              if (currentItem.optUa) {
+                currentItem.ua = currentItem.optUa;
+              }
+
+              if (currentItem.link2) {
+                currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
+                currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
+                if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
+              }
+
+              if (currentItem.link3) {
+                currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
+                currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
+                if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
+              }
+
+              cricChannels.push(currentItem);
+              channelIndex++;
+            }
+            currentItem = null;
+          };
+
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            if (line.startsWith("#EXTINF:")) {
+              finalizeCurrentItem();
+
+              currentItem = {
+                urls: [],
+                optReferer: "",
+                optOrigin: "",
+                optUa: ""
+              };
+
+              // Extract tvg-logo
+              const logoMatch = line.match(/tvg-logo=["']([^"']+)["']/i);
+              if (logoMatch) {
+                currentItem.logo = logoMatch[1];
+              }
+
+              // Extract group-title
+              const groupMatch = line.match(/group-title=["']([^"']+)["']/i);
+              if (groupMatch) {
+                currentItem.group = groupMatch[1];
+              }
+
+              // Extract tvg-id
+              const idMatch = line.match(/tvg-id=["']([^"']+)["']/i);
+              if (idMatch) {
+                currentItem.tvgId = idMatch[1];
+              }
+
+              // Get the display name (after the last comma)
+              const commaIndex = line.lastIndexOf(",");
+              if (commaIndex !== -1) {
+                currentItem.name = line.substring(commaIndex + 1).trim();
+              } else {
+                currentItem.name = `M3U Channel ${channelIndex + 1}`;
+              }
+            } else if (line.startsWith("#EXTVLCOPT:")) {
+              if (currentItem) {
+                const opt = line.substring("#EXTVLCOPT:".length).trim();
+                const eqIdx = opt.indexOf("=");
+                if (eqIdx !== -1) {
+                  const key = opt.substring(0, eqIdx).toLowerCase().trim();
+                  const val = opt.substring(eqIdx + 1).trim();
+                  if (key === "http-client-referrer" || key === "http-referrer" || key === "referer") {
+                    currentItem.optReferer = val;
+                  } else if (key === "http-user-agent" || key === "user-agent") {
+                    currentItem.optUa = val;
+                  } else if (key === "http-origin" || key === "origin") {
+                    currentItem.optOrigin = val;
+                  }
+                }
+              }
+            } else if (line.startsWith("#")) {
+              // Other comments end the previous channel
+              finalizeCurrentItem();
+            } else {
+              // This is the stream URL
+              if (currentItem) {
+                currentItem.urls.push(line);
+              }
+            }
+          }
+          finalizeCurrentItem();
+        } else {
+          console.warn(`Cloudflare: Failed to fetch CricHD channels from m3u, status: ${response.status}`);
         }
       } catch (err) {
-        console.error("Cloudflare: Error fetching CricHD channels:", err);
+        console.error("Cloudflare: Error fetching CricHD channels from m3u:", err);
       }
 
       // 2. Fetch RoarZone channels (Auto-updating playlist)
