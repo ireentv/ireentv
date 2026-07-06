@@ -360,15 +360,66 @@ function resolveUrl(baseDir: string, relativeUrl: string): string {
     if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
       return relativeUrl;
     }
-    // Handle root relative URL
-    if (relativeUrl.startsWith("/")) {
-      const urlObj = new URL(baseDir);
-      return `${urlObj.protocol}//${urlObj.host}${relativeUrl}`;
+
+    // Detect if baseDir has a double slash after the protocol, e.g. "http://host:port//path/"
+    let protocol = "";
+    let rest = baseDir;
+    if (baseDir.startsWith("http://")) {
+      protocol = "http://";
+      rest = baseDir.substring(7);
+    } else if (baseDir.startsWith("https://")) {
+      protocol = "https://";
+      rest = baseDir.substring(8);
     }
-    // Resolve relative to directory
-    return new URL(relativeUrl, baseDir).href;
+
+    // Check if the rest of baseDir contains a double slash "//" (in the path part)
+    const doubleSlashIndex = rest.indexOf("//");
+    const hasDoubleSlash = doubleSlashIndex !== -1;
+
+    let resolved = "";
+    if (relativeUrl.startsWith("/")) {
+      // Root-relative URL (e.g. /Somoy-TV/segment.ts)
+      const urlObj = new URL(baseDir);
+      resolved = `${urlObj.protocol}//${urlObj.host}${relativeUrl}`;
+    } else {
+      // Relative URL (e.g. segment.ts)
+      resolved = new URL(relativeUrl, baseDir).href;
+    }
+
+    // If the original baseDir had a double slash in its path, but the resolved one doesn't,
+    // we must restore the double slash in the resolved path.
+    if (hasDoubleSlash) {
+      let resolvedRest = resolved;
+      let resolvedProto = "";
+      if (resolved.startsWith("http://")) {
+        resolvedProto = "http://";
+        resolvedRest = resolved.substring(7);
+      } else if (resolved.startsWith("https://")) {
+        resolvedProto = "https://";
+        resolvedRest = resolved.substring(8);
+      }
+
+      // The host ends at the first slash of the resolved URL
+      const firstSlashIdx = resolvedRest.indexOf("/");
+      if (firstSlashIdx !== -1) {
+        const hostPart = resolvedRest.substring(0, firstSlashIdx);
+        let pathPart = resolvedRest.substring(firstSlashIdx);
+        
+        // Ensure pathPart starts with "//" and not just "/"
+        if (pathPart.startsWith("/") && !pathPart.startsWith("//")) {
+          pathPart = "/" + pathPart;
+        }
+        resolved = resolvedProto + hostPart + pathPart;
+      }
+    }
+
+    return resolved;
   } catch (e) {
-    return relativeUrl;
+    // Basic string concatenation fallback
+    if (baseDir.endsWith("/")) {
+      return baseDir + relativeUrl;
+    }
+    return baseDir + "/" + relativeUrl;
   }
 }
 
