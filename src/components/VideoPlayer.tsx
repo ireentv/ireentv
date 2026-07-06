@@ -73,26 +73,22 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
     const mustUseProxy = isHttps && isHttpUrl;
 
     // Determine player URL and initial mode based on playMode
-    let playerUrl = directUrl;
     let initialMode: 'direct' | 'proxy' = 'direct';
-    let hasSwitchedToProxy = false;
 
-    if (playMode === 'proxy' || mustUseProxy) {
-      playerUrl = proxiedUrl;
+    if (playMode === 'proxy' || (playMode === 'auto' && mustUseProxy)) {
       initialMode = 'proxy';
-      hasSwitchedToProxy = true;
     } else if (playMode === 'direct') {
-      playerUrl = directUrl;
       initialMode = 'direct';
-      hasSwitchedToProxy = false;
     } else {
       // playMode === 'auto'
-      playerUrl = directUrl;
       initialMode = 'direct';
-      hasSwitchedToProxy = false;
     }
 
-    setStreamMode(initialMode);
+    let currentMode: 'direct' | 'proxy' = initialMode;
+    const attemptedModes = new Set<string>([currentMode]);
+    setStreamMode(currentMode);
+
+    let playerUrl = currentMode === 'proxy' ? proxiedUrl : directUrl;
 
     let networkErrorRetryCount = 0;
     let otherErrorRetryCount = 0;
@@ -105,20 +101,43 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
       }
     };
 
-    // Smart recovery timeout: if stream does not play within 4.5 seconds, auto-fallback to proxy
+    // Robust bidirectional dual-fallback mode switching
+    const tryFallbackMode = (hlsInstance?: Hls) => {
+      const alternativeMode = currentMode === 'direct' ? 'proxy' : 'direct';
+      if (!attemptedModes.has(alternativeMode)) {
+        console.log(`Playback failed or timed out in ${currentMode} mode. Attempting fallback to ${alternativeMode} mode...`);
+        currentMode = alternativeMode;
+        attemptedModes.add(alternativeMode);
+        setStreamMode(alternativeMode);
+        
+        const targetSource = alternativeMode === 'proxy' ? proxiedUrl : directUrl;
+        
+        clearRecoveryTimeout();
+        networkErrorRetryCount = 0;
+        
+        if (hlsInstance) {
+          hlsInstance.loadSource(targetSource);
+          hlsInstance.startLoad();
+          startFallbackTimeout(hlsInstance);
+        } else {
+          video.src = targetSource;
+          video.load();
+          startFallbackTimeout();
+        }
+        return true; // Mode switched successfully
+      }
+      return false; // Already tried both modes
+    };
+
+    // Smart recovery timeout: if stream does not play within 4.5 seconds, auto-fallback
     const startFallbackTimeout = (hlsInstance?: Hls) => {
       clearRecoveryTimeout();
       fallbackTimeout = setTimeout(() => {
-        if (!hasSwitchedToProxy && !isPlaying) {
-          console.log('Stream loading timed out in direct mode. Automatically switching to Secure Proxy Server...');
-          hasSwitchedToProxy = true;
-          setStreamMode('proxy');
-          if (hlsInstance) {
-            hlsInstance.loadSource(proxiedUrl);
-            hlsInstance.startLoad();
-          } else {
-            video.src = proxiedUrl;
-            video.load();
+        if (!isPlaying) {
+          console.log(`Stream loading timed out in ${currentMode} mode. Triggering automatic fallback...`);
+          if (!tryFallbackMode(hlsInstance)) {
+            setError('Playback timed out. The stream might be offline or blocked.');
+            setIsBuffering(false);
           }
         }
       }, 4500);
@@ -154,14 +173,7 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
     };
 
     const handleNativeError = () => {
-      if (!hasSwitchedToProxy) {
-        console.log('Native video player error, attempting proxy fallback...');
-        clearRecoveryTimeout();
-        hasSwitchedToProxy = true;
-        setStreamMode('proxy');
-        video.src = proxiedUrl;
-        video.load();
-      } else {
+      if (!tryFallbackMode()) {
         setError('Unable to play this channel. It may be offline or temporarily unavailable.');
         setIsBuffering(false);
       }
@@ -216,15 +228,10 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
             case Hls.ErrorTypes.NETWORK_ERROR:
               networkErrorRetryCount++;
               console.log(`Fatal network error (retry ${networkErrorRetryCount}/3)...`);
-              if (!hasSwitchedToProxy) {
-                console.log('Self-healing mechanism: Switching stream to secure proxy server...');
-                clearRecoveryTimeout();
-                hasSwitchedToProxy = true;
-                setStreamMode('proxy');
-                hls.loadSource(proxiedUrl);
+              if (networkErrorRetryCount <= 2) {
                 hls.startLoad();
-              } else if (networkErrorRetryCount <= 3) {
-                hls.startLoad();
+              } else if (tryFallbackMode(hls)) {
+                // Dual-fallback active
               } else {
                 setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
                 setIsBuffering(false);
@@ -247,13 +254,8 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
               break;
               
             default:
-              if (!hasSwitchedToProxy) {
-                console.log('Fatal unknown error, attempting proxy fallback...');
-                clearRecoveryTimeout();
-                hasSwitchedToProxy = true;
-                setStreamMode('proxy');
-                hls.loadSource(proxiedUrl);
-                hls.startLoad();
+              if (tryFallbackMode(hls)) {
+                // Dual-fallback active
               } else {
                 setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
                 setIsBuffering(false);

@@ -3,6 +3,9 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { Readable } from "stream";
 
+// Disable strict SSL certificate verification for incoming IPTV stream links (many use cheap/expired/unverified certificates or IP addresses)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 const app = express();
 const PORT = 3000;
 
@@ -231,13 +234,23 @@ app.get("/api/stream-proxy", async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // Forward client headers (e.g. Range, Accept) to upstream
+    const forwardHeaders: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    };
+
+    if (req.headers.range) {
+      forwardHeaders["Range"] = req.headers.range as string;
+    }
+    if (req.headers.accept) {
+      forwardHeaders["Accept"] = req.headers.accept as string;
+    }
+
     const response = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      }
+      headers: forwardHeaders
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 206) {
       return res.status(response.status).send(`Failed to fetch upstream stream: ${response.statusText}`);
     }
 
@@ -305,14 +318,25 @@ app.get("/api/stream-proxy", async (req, res) => {
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       return res.send(rewrittenLines.join("\n"));
     } else {
-      // It's a binary file (like a .ts segment). Stream it directly to the response
-      if (contentType) {
-        res.setHeader("Content-Type", contentType);
+      // Forward safe upstream headers to the response
+      const headersToForward = [
+        "content-type",
+        "content-length",
+        "content-range",
+        "accept-ranges",
+        "cache-control",
+        "expires"
+      ];
+
+      for (const h of headersToForward) {
+        const val = response.headers.get(h);
+        if (val) {
+          res.setHeader(h, val);
+        }
       }
-      const contentLength = response.headers.get("content-length");
-      if (contentLength) {
-        res.setHeader("Content-Length", contentLength);
-      }
+
+      // Set correct response status (e.g., 200 OK or 206 Partial Content)
+      res.status(response.status);
 
       // Stream the body using Node standard streams
       if (response.body) {

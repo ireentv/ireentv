@@ -80,6 +80,7 @@ export async function onRequest(context: any) {
     corsHeaders.set("Access-Control-Allow-Origin", "*");
     corsHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     corsHeaders.set("Access-Control-Allow-Headers", "*");
+    corsHeaders.set("Access-Control-Expose-Headers", "*");
 
     if (context.request.method === "OPTIONS") {
       return new Response(null, {
@@ -88,13 +89,26 @@ export async function onRequest(context: any) {
       });
     }
 
+    // Forward Range and Accept headers from client to upstream
+    const clientHeaders = context.request.headers;
+    const forwardHeaders: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    };
+
+    const range = clientHeaders.get("range");
+    if (range) {
+      forwardHeaders["Range"] = range;
+    }
+    const accept = clientHeaders.get("accept");
+    if (accept) {
+      forwardHeaders["Accept"] = accept;
+    }
+
     const upstreamRes = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      }
+      headers: forwardHeaders
     });
 
-    if (!upstreamRes.ok) {
+    if (!upstreamRes.ok && upstreamRes.status !== 206) {
       return new Response(`Failed to fetch upstream stream: ${upstreamRes.statusText}`, {
         status: upstreamRes.status,
         headers: corsHeaders
@@ -161,12 +175,25 @@ export async function onRequest(context: any) {
         headers: corsHeaders
       });
     } else {
-      if (contentType) corsHeaders.set("Content-Type", contentType);
-      const contentLength = upstreamRes.headers.get("content-length");
-      if (contentLength) corsHeaders.set("Content-Length", contentLength);
+      // Forward safe response headers to client
+      const headersToForward = [
+        "content-type",
+        "content-length",
+        "content-range",
+        "accept-ranges",
+        "cache-control",
+        "expires"
+      ];
+
+      for (const h of headersToForward) {
+        const val = upstreamRes.headers.get(h);
+        if (val) {
+          corsHeaders.set(h, val);
+        }
+      }
 
       return new Response(upstreamRes.body, {
-        status: 200,
+        status: upstreamRes.status,
         headers: corsHeaders
       });
     }
