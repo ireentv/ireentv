@@ -1,8 +1,6 @@
 {
-  "name": "Remix: CricStream LiveHD",
-  "description": "An auto-updated, permanent server-proxied CricHD live streaming TV website with custom user controls and high quality playback.",
+  "name": "IREENTV",
+  "description": "একটি আধুনিক টিভি ওয়েবসাইট যেখানে লাইভ ভিডিও স্ট্রিম, সার্চ অপশন, ডার্ক মোড এবং পছন্দের তালিকা সংরক্ষণ করার সুবিধা রয়েছে।",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

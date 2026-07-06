@@ -1,899 +1,396 @@
 import express from "express";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
+import { Readable } from "stream";
 
 const app = express();
 const PORT = 3000;
 
-// Middleware for parsing query strings and body
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+interface Channel {
+  id: string;
+  name: string;
+  url: string;
+  logo: string;
+  category: string;
+  urls?: string[];
+}
 
-// Serve API for channels from CricHD API and FanCode Live Events API
+// In-memory cache for IPTV channels
+let cachedChannels: Channel[] = [];
+let cacheTime = 0;
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes cache duration
+
+const PLAYLIST_URL = "https://raw.githubusercontent.com/lotaji/playlist-vip/refs/heads/main/playlist_vip.m3u";
+
+// Robust M3U Parser with Grouping / Server Consolidator
+function parseM3U(data: string): Channel[] {
+  const rawChannels: Channel[] = [];
+  const lines = data.split('\n');
+  let currentChannel: Partial<Channel> | null = null;
+  let index = 1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    if (line.startsWith('#EXTINF:')) {
+      // If we already have an active channel, push it to the list first before starting a new one
+      if (currentChannel && currentChannel.url) {
+        if (!currentChannel.id || currentChannel.id.trim() === '') {
+          currentChannel.id = `ch-${index}`;
+        } else {
+          currentChannel.id = `${currentChannel.id}-${index}`;
+        }
+        rawChannels.push(currentChannel as Channel);
+        index++;
+      }
+
+      currentChannel = {
+        urls: []
+      };
+      
+      // Extract tvg-logo
+      const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
+      currentChannel.logo = logoMatch ? logoMatch[1] : '';
+
+      // Extract group-title (category)
+      const categoryMatch = line.match(/group-title="([^"]*)"/i);
+      let rawCategory = categoryMatch ? categoryMatch[1].trim() : '';
+
+      if (!rawCategory) {
+        const categoryMatch2 = line.match(/group-title=([^,\s]+)/i);
+        rawCategory = categoryMatch2 ? categoryMatch2[1].replace(/"/g, '').trim() : 'Others';
+      }
+
+      // Standardize categories
+      let category = 'Others';
+      if (rawCategory) {
+        const catLower = rawCategory.toLowerCase();
+        if (catLower === 'bangla' || catLower === 'bangladeshi' || catLower.includes('bangla')) {
+          category = 'Bangla';
+        } else if (catLower === 'sports' || catLower.includes('cricket') || catLower.includes('fifa')) {
+          category = 'Sports';
+        } else if (catLower === 'movies' || catLower.includes('movie') || catLower.includes('cine')) {
+          category = 'Movies';
+        } else if (catLower === 'music' || catLower.includes('beat')) {
+          category = 'Music';
+        } else if (catLower === 'kids' || catLower.includes('cartoon') || catLower.includes('gopal')) {
+          category = 'Kids';
+        } else if (catLower === 'documentary' || catLower.includes('earth') || catLower.includes('discovery') || catLower.includes('geo')) {
+          category = 'Documentary';
+        } else if (catLower === 'islamic' || catLower.includes('relagion') || catLower.includes('quran') || catLower.includes('peace')) {
+          category = 'Islamic';
+        } else if (catLower === 'news') {
+          category = 'News';
+        } else if (catLower === 'hindi' || catLower.includes('entertainment')) {
+          category = 'Hindi';
+        } else {
+          // Keep raw category if it's not empty, capitalized nicely
+          category = rawCategory.charAt(0).toUpperCase() + rawCategory.slice(1);
+        }
+      }
+      currentChannel.category = category;
+
+      // Extract name
+      const lastCommaIndex = line.lastIndexOf(',');
+      if (lastCommaIndex !== -1) {
+        currentChannel.name = line.substring(lastCommaIndex + 1).trim();
+      } else {
+        currentChannel.name = 'Unknown Channel';
+      }
+
+      // Extract tvg-id if present
+      const idMatch = line.match(/tvg-id="([^"]*)"/i);
+      currentChannel.id = idMatch ? idMatch[1] : '';
+
+    } else if (line.startsWith('#')) {
+      continue;
+    } else {
+      // This is the URL line
+      if (currentChannel) {
+        if (!currentChannel.url) {
+          currentChannel.url = line;
+        }
+        if (currentChannel.urls) {
+          currentChannel.urls.push(line);
+        } else {
+          currentChannel.urls = [line];
+        }
+      }
+    }
+  }
+
+  // Handle the last remaining channel after loop
+  if (currentChannel && currentChannel.url) {
+    if (!currentChannel.id || currentChannel.id.trim() === '') {
+      currentChannel.id = `ch-${index}`;
+    } else {
+      currentChannel.id = `${currentChannel.id}-${index}`;
+    }
+    rawChannels.push(currentChannel as Channel);
+  }
+
+  // Deduplicate and group channels with the same name to form "Servers"
+  const grouped: Channel[] = [];
+  const nameMap = new Map<string, Channel>();
+
+  rawChannels.forEach(ch => {
+    const key = ch.name.trim().toLowerCase();
+    const existing = nameMap.get(key);
+    if (existing) {
+      if (ch.url && !existing.urls?.includes(ch.url)) {
+        existing.urls = [...(existing.urls || [existing.url]), ch.url];
+      }
+    } else {
+      const newChan: Channel = {
+        ...ch,
+        urls: ch.urls && ch.urls.length > 0 ? ch.urls : [ch.url]
+      };
+      nameMap.set(key, newChan);
+      grouped.push(newChan);
+    }
+  });
+
+  return grouped;
+}
+
+// API endpoint to fetch parsed channels with server-side caching
 app.get("/api/channels", async (req, res) => {
   try {
-    // 1. Fetch CricHD channels (Now replaced with playlist_vip.m3u)
-    let cricChannels: any[] = [];
-    try {
-      const response = await fetch(
-        "https://raw.githubusercontent.com/lotaji/playlist-vip/refs/heads/main/playlist_vip.m3u"
-      );
-      if (response.ok) {
-        const text = await response.text();
-        const lines = text.split(/\r?\n/);
-        let currentItem: any = null;
-        let channelIndex = 0;
+    const now = Date.now();
+    const forceRefresh = req.query.refresh === 'true';
 
-        const finalizeCurrentItem = () => {
-          if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
-            const urls = currentItem.urls;
-            currentItem.link = urls[0];
-            if (urls.length > 1) {
-              currentItem.link2 = urls[1];
-            }
-            if (urls.length > 2) {
-              currentItem.link3 = urls[2];
-            }
-
-            currentItem.id = currentItem.tvgId ? `crichd-m3u-${currentItem.tvgId}-${channelIndex}` : `crichd-m3u-${channelIndex}`;
-
-            if (!currentItem.logo) {
-              currentItem.logo = "https://images.unsplash.com/photo-1540747737956-378724044453?q=80&w=200&auto=format&fit=crop";
-            }
-
-            currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
-            currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
-            if (currentItem.optUa) {
-              currentItem.ua = currentItem.optUa;
-            }
-
-            if (currentItem.link2) {
-              currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
-              currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
-              if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
-            }
-
-            if (currentItem.link3) {
-              currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
-              currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
-              if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
-            }
-
-            cricChannels.push(currentItem);
-            channelIndex++;
-          }
-          currentItem = null;
-        };
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-
-          if (line.startsWith("#EXTINF:")) {
-            finalizeCurrentItem();
-
-            currentItem = {
-              urls: [],
-              optReferer: "",
-              optOrigin: "",
-              optUa: ""
-            };
-
-            // Extract tvg-logo
-            const logoMatch = line.match(/tvg-logo=["']([^"']+)["']/i);
-            if (logoMatch) {
-              currentItem.logo = logoMatch[1];
-            }
-
-            // Extract group-title
-            const groupMatch = line.match(/group-title=["']([^"']+)["']/i);
-            if (groupMatch) {
-              currentItem.group = groupMatch[1];
-            }
-
-            // Extract tvg-id
-            const idMatch = line.match(/tvg-id=["']([^"']+)["']/i);
-            if (idMatch) {
-              currentItem.tvgId = idMatch[1];
-            }
-
-            // Get the display name (after the last comma)
-            const commaIndex = line.lastIndexOf(",");
-            if (commaIndex !== -1) {
-              currentItem.name = line.substring(commaIndex + 1).trim();
-            } else {
-              currentItem.name = `M3U Channel ${channelIndex + 1}`;
-            }
-          } else if (line.startsWith("#EXTVLCOPT:")) {
-            if (currentItem) {
-              const opt = line.substring("#EXTVLCOPT:".length).trim();
-              const eqIdx = opt.indexOf("=");
-              if (eqIdx !== -1) {
-                const key = opt.substring(0, eqIdx).toLowerCase().trim();
-                const val = opt.substring(eqIdx + 1).trim();
-                if (key === "http-client-referrer" || key === "http-referrer" || key === "referer") {
-                  currentItem.optReferer = val;
-                } else if (key === "http-user-agent" || key === "user-agent") {
-                  currentItem.optUa = val;
-                } else if (key === "http-origin" || key === "origin") {
-                  currentItem.optOrigin = val;
-                }
-              }
-            }
-          } else if (line.startsWith("#")) {
-            // Other comments end the previous channel
-            finalizeCurrentItem();
-          } else {
-            // This is the stream URL
-            if (currentItem) {
-              currentItem.urls.push(line);
-            }
-          }
-        }
-        finalizeCurrentItem();
-      } else {
-        console.warn(`Failed to fetch CricHD channels from m3u, status: ${response.status}`);
-      }
-    } catch (err) {
-      console.error("Error fetching CricHD channels from m3u:", err);
-    }
-
-    // 2. Fetch RoarZone channels (Auto-updating playlist)
-    let roarZoneChannels: any[] = [];
-    try {
-      const roarResponse = await fetch(
-        "https://raw.githubusercontent.com/sm-monirulislam/RoarZone-Auto-Update-playlist/refs/heads/main/RoarZone_data.json"
-      );
-      if (roarResponse.ok) {
-        const rawRoarData: any = await roarResponse.json();
-        
-        let parsedArray: any[] = [];
-        if (rawRoarData && rawRoarData.response && Array.isArray(rawRoarData.response)) {
-          parsedArray = rawRoarData.response;
-        } else if (Array.isArray(rawRoarData)) {
-          parsedArray = rawRoarData;
-        } else if (rawRoarData && typeof rawRoarData === "object") {
-          const firstArrayKey = Object.keys(rawRoarData).find(k => Array.isArray(rawRoarData[k]));
-          if (firstArrayKey) {
-            parsedArray = rawRoarData[firstArrayKey];
-          }
-        }
-
-        roarZoneChannels = parsedArray.map((item: any, index: number) => {
-          const streamUrl = item.url || item.link || item.stream || item.stream_url || "";
-          const logoUrl = item.logo || item.src || item.image || item.thumbnail || "https://images.unsplash.com/photo-1540747737956-378724044453?q=80&w=200&auto=format&fit=crop";
-          
-          const refererVal = "https://tv.roarzone.net/";
-          const originVal = "https://tv.roarzone.net";
-
-          const genreSuffix = item.group ? ` [${item.group.toUpperCase()}]` : "";
-          const name = `${item.name || `RoarZone CL ${index + 1}`}${genreSuffix}`;
-
-          return {
-            id: String(item.id || `roarzone-${index}`),
-            name: name,
-            logo: logoUrl,
-            link: streamUrl,
-            referer: item.referer || item.headers?.Referer || refererVal,
-            origin: item.origin || item.headers?.Origin || originVal,
-            isRoarZone: true
-          };
-        }).filter((c: any) => c.link);
-      } else {
-        console.warn(`Failed to fetch RoarZone channels, status: ${roarResponse.status}`);
-      }
-    } catch (err) {
-      console.error("Error fetching RoarZone channels:", err);
-    }
-
-    // Fetch Live Sports HD channels (Auto Update Live Sports Data from M3U playlists)
-    let footballHDChannels: any[] = [];
-    const m3uPlaylists = [
-      "https://raw.githubusercontent.com/sportlive18/Sonyliv-Playlist-Autoupdate/refs/heads/main/sonyliv.m3u",
-      "https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u"
-    ];
-
-    let channelIndex = 0;
-    for (const url of m3uPlaylists) {
-      try {
-        const fbResponse = await fetch(url);
-        if (fbResponse.ok) {
-          const text = await fbResponse.text();
-          const lines = text.split(/\r?\n/);
-          let currentItem: any = null;
-
-          const finalizeCurrentItem = () => {
-            if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
-              const urls = currentItem.urls;
-              currentItem.link = urls[0];
-              if (urls.length > 1) {
-                currentItem.link2 = urls[1];
-              }
-              if (urls.length > 2) {
-                currentItem.link3 = urls[2];
-              }
-
-              currentItem.id = currentItem.tvgId ? `football-m3u-${currentItem.tvgId}-${channelIndex}` : `football-m3u-${channelIndex}`;
-
-              if (!currentItem.logo) {
-                currentItem.logo = "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=200&auto=format&fit=crop";
-              }
-
-              currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
-              currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
-              if (currentItem.optUa) {
-                currentItem.ua = currentItem.optUa;
-              }
-
-              if (currentItem.link2) {
-                currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
-                currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
-                if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
-              }
-
-              if (currentItem.link3) {
-                currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
-                currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
-                if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
-              }
-
-              currentItem.status = "LIVE";
-              footballHDChannels.push(currentItem);
-              channelIndex++;
-            }
-            currentItem = null;
-          };
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            if (line.startsWith("#EXTINF:")) {
-              finalizeCurrentItem();
-
-              currentItem = {
-                isFootballHDZone: true,
-                group: "Football",
-                urls: [],
-                optReferer: "",
-                optOrigin: "",
-                optUa: ""
-              };
-
-              // Extract tvg-logo
-              const logoMatch = line.match(/tvg-logo=["']([^"']+)["']/i);
-              if (logoMatch) {
-                currentItem.logo = logoMatch[1];
-              }
-
-              // Extract group-title
-              const groupMatch = line.match(/group-title=["']([^"']+)["']/i);
-              if (groupMatch) {
-                currentItem.group = groupMatch[1];
-              }
-
-              // Extract tvg-id
-              const idMatch = line.match(/tvg-id=["']([^"']+)["']/i);
-              if (idMatch) {
-                currentItem.tvgId = idMatch[1];
-              }
-
-              // Get the display name (after the last comma)
-              const commaIndex = line.lastIndexOf(",");
-              if (commaIndex !== -1) {
-                currentItem.name = line.substring(commaIndex + 1).trim();
-              } else {
-                currentItem.name = `M3U Channel ${channelIndex + 1}`;
-              }
-            } else if (line.startsWith("#EXTVLCOPT:")) {
-              if (currentItem) {
-                const opt = line.substring("#EXTVLCOPT:".length).trim();
-                const eqIdx = opt.indexOf("=");
-                if (eqIdx !== -1) {
-                  const key = opt.substring(0, eqIdx).toLowerCase().trim();
-                  const val = opt.substring(eqIdx + 1).trim();
-                  if (key === "http-client-referrer" || key === "http-referrer" || key === "referer") {
-                    currentItem.optReferer = val;
-                  } else if (key === "http-user-agent" || key === "user-agent") {
-                    currentItem.optUa = val;
-                  } else if (key === "http-origin" || key === "origin") {
-                    currentItem.optOrigin = val;
-                  }
-                }
-              }
-            } else if (line.startsWith("#")) {
-              // Other comments end the previous channel
-              finalizeCurrentItem();
-            } else {
-              // This is the stream URL
-              if (currentItem) {
-                currentItem.urls.push(line);
-              }
-            }
-          }
-          finalizeCurrentItem();
-        }
-      } catch (err) {
-        console.error(`Error fetching Live Sports HD channels from ${url}:`, err);
-      }
-    }
-
-    // Combine both streams
-    let combinedChannels = [...cricChannels, ...roarZoneChannels, ...footballHDChannels];
-
-    // 3. (Removed CricHD and AynaOTT playlists as requested)
-    const smCricChannels: any[] = [];
-    const aynaChannels: any[] = [];
-
-    // 5. Fetch sm-monirulislam Toffee channels (Server 3/Server 2 sources)
-    let toffeeChannels: any[] = [];
-    try {
-      const toffeeResponse = await fetch(
-        "https://raw.githubusercontent.com/sm-monirulislam/Toffee-Auto-Update-Playlist/refs/heads/main/toffee_data.json"
-      );
-      if (toffeeResponse.ok) {
-        const toffeeData: any = await toffeeResponse.json();
-        if (toffeeData && Array.isArray(toffeeData.response)) {
-          toffeeChannels = toffeeData.response;
-        } else if (Array.isArray(toffeeData)) {
-          toffeeChannels = toffeeData;
-        }
-      } else {
-        console.warn(`Failed to fetch Toffee channels, status: ${toffeeResponse.status}`);
-      }
-    } catch (err) {
-      console.error("Error fetching Toffee channels:", err);
-    }
-
-    // Helper clean function for fuzzy string matching
-    const cleanChanName = (name: string) => {
-      return name.toLowerCase()
-        .replace(/\[.*?\]/g, "")
-        .replace(/\(.*?\)/g, "")
-        .replace(/\s+/g, " ")
-        .replace(/[^\w\s\u0980-\u09FF]/gi, "")
-        .trim();
-    };
-
-    const stripSuffixes = (cl: string) => {
-      return cl.replace(/\b(hd|sd|tv|sports|channel)\b/g, "").replace(/\s+/g, " ").trim();
-    };
-
-    // Build a map of Server 2 channels by lowercase ID and lowercase clean title
-    const smMap = new Map<string, any>();
-    for (const smChan of smCricChannels) {
-      const idKey = smChan.id ? String(smChan.id).toLowerCase().trim() : "";
-      if (idKey) {
-        smMap.set(idKey, smChan);
-      }
-      const titleKey = smChan.title ? String(smChan.title).toLowerCase().trim() : "";
-      if (titleKey) {
-        smMap.set(titleKey, smChan);
-      }
-    }
-
-    // Build a map of Server 2 AynaOTT channels for RoarZone by lowercase ID, lowercase clean title, and suffix-stripped key
-    const ayMap = new Map<string, any>();
-    for (const item of aynaChannels) {
-      const rawTitle = String(item.title || "").toLowerCase().trim();
-      if (rawTitle) {
-        ayMap.set(rawTitle, item);
-      }
-      const clTitle = cleanChanName(item.title || "");
-      if (clTitle) {
-        ayMap.set(clTitle, item);
-        const st = stripSuffixes(clTitle);
-        if (st && !ayMap.has("st:" + st)) {
-          ayMap.set("st:" + st, item);
-        }
-      }
-      const idKey = item.id ? String(item.id).toLowerCase().trim() : "";
-      if (idKey) {
-        ayMap.set(idKey, item);
-      }
-    }
-
-    // Build a map of Toffee channels by lowercase name, lowercase clean name, and suffix-stripped key
-    const tfMap = new Map<string, any>();
-    for (const item of toffeeChannels) {
-      const rawTitle = String(item.name || "").toLowerCase().trim();
-      if (rawTitle) {
-        tfMap.set(rawTitle, item);
-      }
-      const clTitle = cleanChanName(item.name || "");
-      if (clTitle) {
-        tfMap.set(clTitle, item);
-        const st = stripSuffixes(clTitle);
-        if (st && !tfMap.has("st:" + st)) {
-          tfMap.set("st:" + st, item);
-        }
-      }
-    }
-
-    // Assign Server 2 / Server 3 links to matching channels
-    const matchedToffeeLinks = new Set<string>();
-    combinedChannels = combinedChannels.map((chan: any) => {
-      let updated = { ...chan };
-      const idKey = chan.id ? String(chan.id).toLowerCase().trim() : "";
-      const nameKey = chan.name ? String(chan.name).toLowerCase().trim() : "";
-      const cleanName = cleanChanName(chan.name || "");
-
-      if (chan.isRoarZone) {
-        // Match with AynaOTT Server 2
-        let matched = ayMap.get(idKey) || ayMap.get(nameKey) || ayMap.get(cleanName);
-        if (!matched && chan.name) {
-          const stR = stripSuffixes(cleanName);
-          if (stR && ayMap.has("st:" + stR)) {
-            matched = ayMap.get("st:" + stR);
-          }
-        }
-
-        if (matched && matched.url) {
-          updated.link2 = matched.url;
-          updated.referer2 = matched.referer || "https://executeandship.com/";
-          updated.origin2 = matched.origin || "https://executeandship.com";
-        }
-      } else {
-        // Match with CricHD Server 2
-        let matched = smMap.get(idKey) || smMap.get(nameKey);
-        
-        // Fuzzy name matching
-        if (!matched && chan.name) {
-          matched = smMap.get(cleanName);
-          if (!matched) {
-            for (const smChan of smCricChannels) {
-              const cleanSmTitle = cleanChanName(smChan.title || "");
-              if (cleanSmTitle && (cleanSmTitle === cleanName || cleanName.includes(cleanSmTitle) || cleanSmTitle.includes(cleanName))) {
-                matched = smChan;
-                break;
-              }
-            }
-          }
-        }
-
-        if (matched && matched.url) {
-          let finalLink2 = matched.url;
-          try {
-            if (chan.link && matched.url) {
-              const url1 = new URL(chan.link);
-              const url2 = new URL(matched.url);
-              const md5 = url1.searchParams.get("md5");
-              const expires = url1.searchParams.get("expires");
-              if (md5 && expires) {
-                url2.searchParams.set("md5", md5);
-                url2.searchParams.set("expires", expires);
-                finalLink2 = url2.toString();
-              }
-            }
-          } catch (e) {
-            console.error("Error migrating token to Server 2 URL:", e);
-          }
-
-          updated.link2 = finalLink2;
-          updated.referer2 = matched.Referer || matched.referer || "https://executeandship.com/";
-          updated.origin2 = matched.Origin || matched.origin || "https://executeandship.com";
-        }
-      }
-
-      // Match and merge with Toffee Channel
-      let toffeeMatch = tfMap.get(idKey) || tfMap.get(nameKey) || tfMap.get(cleanName);
-      if (!toffeeMatch && chan.name) {
-        const stR = stripSuffixes(cleanName);
-        if (stR && tfMap.has("st:" + stR)) {
-          toffeeMatch = tfMap.get("st:" + stR);
-        }
-      }
-      if (!toffeeMatch && cleanName) {
-        for (const tfChan of toffeeChannels) {
-          const cleanTfTitle = cleanChanName(tfChan.name || "");
-          if (cleanTfTitle && (cleanTfTitle === cleanName || cleanName.includes(cleanTfTitle) || cleanTfTitle.includes(cleanName))) {
-            toffeeMatch = tfChan;
-            break;
-          }
-        }
-      }
-
-      if (toffeeMatch && toffeeMatch.link) {
-        matchedToffeeLinks.add(toffeeMatch.link);
-        const linkVal = toffeeMatch.link;
-        const refVal = "https://toffeelive.com/";
-        const origVal = "https://toffeelive.com";
-        const headers = toffeeMatch.headers || {};
-        const cookieVal = headers.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1780846724:KeyName=prod_linear:Signature=qw1ZBDwKDO8cVUbNd8jIak3w3SjFHXu9q8jtfYBaxB5gi-Dce5fdVUOykuYyY-8W6P3Xzhoq_CGU3YvIjfkvDg";
-        const uaVal = headers["user-agent"] || headers.User_Agent || "Mozilla/5.0 (Linux; Android 14; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
-        const hostVal = headers.Host || "bldcmprod-cdn.toffeelive.com";
-
-        if (!updated.link2) {
-          updated.link2 = linkVal;
-          updated.referer2 = refVal;
-          updated.origin2 = origVal;
-          updated.cookie2 = cookieVal;
-          updated.ua2 = uaVal;
-          updated.host2 = hostVal;
-        } else {
-          updated.link3 = linkVal;
-          updated.referer3 = refVal;
-          updated.origin3 = origVal;
-          updated.cookie3 = cookieVal;
-          updated.ua3 = uaVal;
-          updated.host3 = hostVal;
-        }
-      }
-
-      return updated;
-    });
-
-    const unmatchedToffeeChannels = toffeeChannels
-      .filter((tfChan: any) => tfChan && tfChan.link && !matchedToffeeLinks.has(tfChan.link))
-      .map((tfChan: any, idx: number) => {
-        const headers = tfChan.headers || {};
-        const cookieVal = headers.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1780846724:KeyName=prod_linear:Signature=qw1ZBDwKDO8cVUbNd8jIak3w3SjFHXu9q8jtfYBaxB5gi-Dce5fdVUOykuYyY-8W6P3Xzhoq_CGU3YvIjfkvDg";
-        const uaVal = headers["user-agent"] || headers.User_Agent || "Mozilla/5.0 (Linux; Android 14; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
-        const hostVal = headers.Host || "bldcmprod-cdn.toffeelive.com";
-
-        return {
-          id: `toffee-direct-${idx}`,
-          name: tfChan.name || "Toffee Channel",
-          logo: tfChan.logo || "https://images.unsplash.com/photo-1540747737956-378724044432?q=80&w=200&auto=format&fit=crop",
-          link: tfChan.link,
-          referer: "https://toffeelive.com/",
-          origin: "https://toffeelive.com",
-          cookie: cookieVal,
-          ua: uaVal,
-          host: hostVal,
-          group: tfChan.category_name || "Toffee TV",
-          status: "LIVE"
-        };
+    if (cachedChannels.length > 0 && (now - cacheTime < CACHE_DURATION) && !forceRefresh) {
+      console.log("Serving IPTV channels from cache.");
+      return res.json({
+        success: true,
+        source: 'cache',
+        count: cachedChannels.length,
+        channels: cachedChannels
       });
+    }
 
-    combinedChannels = [...combinedChannels, ...unmatchedToffeeChannels];
+    console.log("Fetching fresh IPTV playlist from GitHub...");
+    const response = await fetch(PLAYLIST_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch playlist: ${response.statusText}`);
+    }
 
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.json(combinedChannels);
+    const playlistData = await response.text();
+    const channels = parseM3U(playlistData);
+
+    if (channels.length === 0) {
+      throw new Error("No channels could be parsed from the playlist.");
+    }
+
+    cachedChannels = channels;
+    cacheTime = now;
+
+    console.log(`Successfully parsed ${channels.length} channels.`);
+    res.json({
+      success: true,
+      source: 'live',
+      count: channels.length,
+      channels: channels
+    });
   } catch (error: any) {
-    console.error("Error loading channels:", error);
-    res.status(500).json({ error: error.message || "Failed to load channels" });
+    console.error("Error in /api/channels:", error.message);
+    
+    // Fallback to cache if available
+    if (cachedChannels.length > 0) {
+      return res.json({
+        success: true,
+        source: 'stale-cache',
+        error: error.message,
+        count: cachedChannels.length,
+        channels: cachedChannels
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to load TV channels"
+    });
   }
 });
 
-// Proxy for .m3u8 playlists
-function getFullTargetUrl(req: any): string {
+// Stream proxy endpoint to bypass Mixed Content (HTTP vs HTTPS) blocks in browsers
+app.get("/api/stream-proxy", async (req, res) => {
   const targetUrl = req.query.url as string;
-  if (!targetUrl) return "";
+  if (!targetUrl) {
+    return res.status(400).send("Missing stream 'url' parameter");
+  }
 
   try {
-    const urlObj = new URL(targetUrl);
-    // Append any extra query parameters that were parsed by Express
-    for (const key of Object.keys(req.query)) {
-      if (["url", "referer", "origin", "cookie", "ua", "host"].includes(key)) {
-        continue;
-      }
-      if (!urlObj.searchParams.has(key)) {
-        urlObj.searchParams.set(key, req.query[key] as string);
-      }
+    // Set permissive CORS headers for the player
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
     }
-    return urlObj.toString();
-  } catch (e) {
-    const originalUrl = req.originalUrl || "";
-    const qIndex = originalUrl.indexOf("?");
-    if (qIndex !== -1) {
-      const qs = originalUrl.substring(qIndex + 1);
-      const params = new URLSearchParams(qs);
-      params.delete("referer");
-      params.delete("origin");
-      params.delete("cookie");
-      params.delete("ua");
-      params.delete("host");
-      
-      const targetUrlBase = params.get("url") || targetUrl;
-      params.delete("url");
-      
-      try {
-        const urlObj = new URL(targetUrlBase);
-        params.forEach((value, key) => {
-          if (!urlObj.searchParams.has(key)) {
-            urlObj.searchParams.set(key, value);
-          }
-        });
-        return urlObj.toString();
-      } catch (err) {
-        let searchToAppend = params.toString();
-        if (searchToAppend) {
-          return targetUrlBase + (targetUrlBase.includes("?") ? "&" : "?") + searchToAppend;
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send(`Failed to fetch upstream stream: ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const isM3U8 = targetUrl.includes(".m3u8") || contentType.includes("mpegurl") || contentType.includes("application/x-mpegurl") || contentType.includes("vnd.apple.mpegurl");
+
+    if (isM3U8) {
+      // It's a playlist. Download it as text and rewrite relative/http links to go through our proxy
+      const text = await response.text();
+      const lines = text.split("\n");
+      const rewrittenLines = [];
+
+      // Determine the base URL for relative paths
+      let baseUrl = targetUrl;
+      if (targetUrl.includes("?")) {
+        baseUrl = targetUrl.split("?")[0];
+      }
+      const lastSlashIndex = baseUrl.lastIndexOf("/");
+      const baseDir = lastSlashIndex !== -1 ? baseUrl.substring(0, lastSlashIndex + 1) : baseUrl;
+
+      // Extract the query parameters of the parent playlist to preserve them for relative paths (such as tokens)
+      const parentQueryIndex = targetUrl.indexOf("?");
+      const parentQuery = parentQueryIndex !== -1 ? targetUrl.substring(parentQueryIndex) : "";
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) {
+          rewrittenLines.push("");
+          continue;
         }
-        return targetUrlBase;
+
+        const isRelative = !line.startsWith("http://") && !line.startsWith("https://");
+
+        if (line.startsWith("#")) {
+          // If it's a URI in a tag like #EXT-X-KEY:METHOD=AES-128,URI="http://..." or #EXT-X-STREAM-INF:BANDWIDTH=...,URI="..."
+          let modifiedLine = line;
+          const uriMatch = line.match(/URI="([^"]+)"/i);
+          if (uriMatch) {
+            const relativeUri = uriMatch[1];
+            let absoluteUri = resolveUrl(baseDir, relativeUri);
+            
+            // Preserve token query parameters for relative URLs
+            if (parentQuery && isRelative && !relativeUri.includes("?")) {
+              absoluteUri += parentQuery;
+            }
+            
+            const proxyUri = `/api/stream-proxy?url=${encodeURIComponent(absoluteUri)}`;
+            modifiedLine = line.replace(`URI="${relativeUri}"`, `URI="${proxyUri}"`);
+          }
+          rewrittenLines.push(modifiedLine);
+        } else {
+          // This is a direct URL/URI line (usually a segment (.ts) or sub-playlist)
+          let absoluteUri = resolveUrl(baseDir, line);
+          
+          // Preserve token query parameters for relative URLs
+          if (parentQuery && isRelative && !line.includes("?")) {
+            absoluteUri += parentQuery;
+          }
+          
+          const proxyUri = `/api/stream-proxy?url=${encodeURIComponent(absoluteUri)}`;
+          rewrittenLines.push(proxyUri);
+        }
+      }
+
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      return res.send(rewrittenLines.join("\n"));
+    } else {
+      // It's a binary file (like a .ts segment). Stream it directly to the response
+      if (contentType) {
+        res.setHeader("Content-Type", contentType);
+      }
+      const contentLength = response.headers.get("content-length");
+      if (contentLength) {
+        res.setHeader("Content-Length", contentLength);
+      }
+
+      // Stream the body using Node standard streams
+      if (response.body) {
+        try {
+          if (typeof Readable.fromWeb === "function") {
+            const nodeStream = Readable.fromWeb(response.body as any);
+            nodeStream.pipe(res);
+          } else {
+            // Manual fallback if fromWeb is not available
+            const reader = response.body.getReader();
+            const nodeStream = new Readable({
+              async read() {
+                try {
+                  const { done, value } = await reader.read();
+                  if (done) {
+                    this.push(null);
+                  } else {
+                    this.push(Buffer.from(value));
+                  }
+                } catch (e) {
+                  this.destroy(e as Error);
+                }
+              }
+            });
+            nodeStream.pipe(res);
+          }
+        } catch (streamError) {
+          const buffer = await response.arrayBuffer();
+          res.send(Buffer.from(buffer));
+        }
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
       }
     }
-    return targetUrl;
+  } catch (err: any) {
+    console.error("Stream proxy error for URL:", targetUrl, err.message);
+    res.status(500).send(`Stream Proxy Error: ${err.message}`);
+  }
+});
+
+function resolveUrl(baseDir: string, relativeUrl: string): string {
+  try {
+    // If it's already an absolute URL, return it
+    if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
+      return relativeUrl;
+    }
+    // Handle root relative URL
+    if (relativeUrl.startsWith("/")) {
+      const urlObj = new URL(baseDir);
+      return `${urlObj.protocol}//${urlObj.host}${relativeUrl}`;
+    }
+    // Resolve relative to directory
+    return new URL(relativeUrl, baseDir).href;
+  } catch (e) {
+    return relativeUrl;
   }
 }
 
-app.get("/api/hls/stream.m3u8", async (req, res) => {
-  const targetUrl = getFullTargetUrl(req);
-  let referer = (req.query.referer as string) || "https://executeandship.com/";
-  let origin = (req.query.origin as string) || "https://executeandship.com";
-  const cookieVal = (req.query.cookie as string) || "";
-  const uaVal = (req.query.ua as string) || "";
-  const hostVal = (req.query.host as string) || "";
-
-  if (!targetUrl) {
-    return res.status(400).send("Missing target m3u8 URL");
-  }
-
-  // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard streams
-  if (referer.includes("executeandship.com") || referer === "null") {
-    referer = "";
-  }
-  if (origin.includes("executeandship.com") || origin === "null") {
-    origin = "";
-  }
-
-  try {
-    const bdIp = "103.108.140.1";
-    const headers: Record<string, string> = {
-      "User-Agent": uaVal || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "X-Forwarded-For": bdIp,
-      "X-Real-IP": bdIp,
-      "Client-IP": bdIp,
-      "CF-Connecting-IP": bdIp,
-      "True-Client-IP": bdIp,
-    };
-    if (origin) {
-      headers["Origin"] = origin;
-    }
-    if (referer) {
-      headers["Referer"] = referer;
-    }
-    if (cookieVal) {
-      headers["Cookie"] = cookieVal;
-    }
-    if (hostVal) {
-      headers["Host"] = hostVal;
-    }
-
-    const response = await fetch(targetUrl, { headers });
-    if (!response.ok) {
-      return res.status(response.status).send(`Failed to fetch playlist: ${response.statusText}`);
-    }
-
-    const finalUrl = response.url || targetUrl;
-    const text = await response.text();
-
-    let suffix = "";
-    if (cookieVal) suffix += `&cookie=${encodeURIComponent(cookieVal)}`;
-    if (uaVal) suffix += `&ua=${encodeURIComponent(uaVal)}`;
-    if (hostVal) suffix += `&host=${encodeURIComponent(hostVal)}`;
-
-    // Parse and rewrite HLS playlist
-    const lines = text.split(/\r?\n/);
-    const rewrittenLines = lines.map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
-        // Support inline URIs like #EXT-X-KEY:METHOD=AES-128,URI="https://..."
-        let modifiedLine = line;
-        const uriMatch = line.match(/URI=["']([^"']+)["']/);
-        if (uriMatch) {
-          const rawUri = uriMatch[1];
-          let absoluteUri = rawUri;
-          try {
-            const resolvedUri = new URL(rawUri, finalUrl);
-            const finalUrlObj = new URL(finalUrl);
-            if (!resolvedUri.search && finalUrlObj.search) {
-              resolvedUri.search = finalUrlObj.search;
-            }
-            absoluteUri = resolvedUri.toString();
-          } catch (e) {
-            if (!rawUri.startsWith("http://") && !rawUri.startsWith("https://")) {
-              const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
-              const finalUrlObj = new URL(finalUrl);
-              absoluteUri = baseUrl + rawUri + finalUrlObj.search;
-            }
-          }
-          const isPlaylist = absoluteUri.includes(".m3u8");
-          const proxiedUri = `${isPlaylist ? "/api/hls/stream.m3u8" : "/api/hls/chunk.ts"}?url=${encodeURIComponent(absoluteUri)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
-          modifiedLine = line.replace(rawUri, proxiedUri);
-        }
-        return modifiedLine;
-      }
-
-      // Resolve relative path to absolute
-      let absoluteUrl = "";
-      try {
-        const resolvedUrl = new URL(trimmed, finalUrl);
-        const finalUrlObj = new URL(finalUrl);
-        if (!resolvedUrl.search && finalUrlObj.search) {
-          resolvedUrl.search = finalUrlObj.search;
-        }
-        absoluteUrl = resolvedUrl.toString();
-      } catch (err) {
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-          absoluteUrl = trimmed;
-        } else {
-          const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
-          const finalUrlObj = new URL(finalUrl);
-          absoluteUrl = baseUrl + trimmed + finalUrlObj.search;
-        }
-      }
-
-      // Rewrite sub-playlists or segments
-      if (absoluteUrl.includes(".m3u8")) {
-        return `/api/hls/stream.m3u8?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
-      } else {
-        return `/api/hls/chunk.ts?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
-      }
-    });
-
-    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.send(rewrittenLines.join("\n"));
-  } catch (err: any) {
-    console.error("Error proxying m3u8 stream:", err);
-    res.status(500).send(`Stream proxy error: ${err.message}`);
-  }
-});
-
-// A memory cache for HLS chunks to serve retries instantly other clients or fast rewinds
-const chunkCache = new Map<string, { buffer: Buffer; contentType: string; addedAt: number }>();
-const MAX_CACHE_SIZE = 120;
-
-// Proxy for .ts video segments and other binary static pieces
-app.get("/api/hls/chunk.ts", async (req, res) => {
-  const targetUrl = getFullTargetUrl(req);
-  let referer = (req.query.referer as string) || "https://executeandship.com/";
-  let origin = (req.query.origin as string) || "https://executeandship.com";
-  const cookieVal = (req.query.cookie as string) || "";
-  const uaVal = (req.query.ua as string) || "";
-  const hostVal = (req.query.host as string) || "";
-
-  if (!targetUrl) {
-    return res.status(400).send("Missing target chunk URL");
-  }
-
-  // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard chunks
-  if (referer.includes("executeandship.com") || referer === "null") {
-    referer = "";
-  }
-  if (origin.includes("executeandship.com") || origin === "null") {
-    origin = "";
-  }
-
-  // Serve from cache instantly if hit
-  if (chunkCache.has(targetUrl)) {
-    const cached = chunkCache.get(targetUrl)!;
-    res.setHeader("Content-Type", cached.contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("X-Cache", "HIT");
-    return res.send(cached.buffer);
-  }
-
-  try {
-    const bdIp = "103.108.140.1";
-    const headers: Record<string, string> = {
-      "User-Agent": uaVal || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Connection": "keep-alive",
-      "X-Forwarded-For": bdIp,
-      "X-Real-IP": bdIp,
-      "Client-IP": bdIp,
-      "CF-Connecting-IP": bdIp,
-      "True-Client-IP": bdIp,
-    };
-    if (origin) {
-      headers["Origin"] = origin;
-    }
-    if (referer) {
-      headers["Referer"] = referer;
-    }
-    if (cookieVal) {
-      headers["Cookie"] = cookieVal;
-    }
-    if (hostVal) {
-      headers["Host"] = hostVal;
-    }
-
-    const response = await fetch(targetUrl, { headers });
-    if (!response.ok) {
-      return res.status(response.status).send(`Failed to fetch chunk: ${response.statusText}`);
-    }
-
-    const contentType = response.headers.get("Content-Type") || "video/mp2t";
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.setHeader("X-Cache", "MISS");
-
-    // Modern fetch streaming to bypass buffering lag
-    if (response.body && typeof (response.body as any).getReader === "function") {
-      const reader = (response.body as any).getReader();
-      const chunks: Uint8Array[] = [];
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          res.write(value);
-        }
-        res.end();
-
-        // Compile combined chunk for caching
-        const totalSize = chunks.reduce((acc, c) => acc + c.length, 0);
-        const fullBuffer = Buffer.alloc(totalSize);
-        let offset = 0;
-        for (const c of chunks) {
-          fullBuffer.set(c, offset);
-          offset += c.length;
-        }
-
-        // Clean cache space
-        if (chunkCache.size >= MAX_CACHE_SIZE) {
-          const oldestKey = chunkCache.keys().next().value;
-          if (oldestKey !== undefined) {
-            chunkCache.delete(oldestKey);
-          }
-        }
-        // Save to cache
-        chunkCache.set(targetUrl, {
-          buffer: fullBuffer,
-          contentType,
-          addedAt: Date.now()
-        });
-
-      } catch (streamErr) {
-        console.error("HLS Chunk streaming transfer error:", streamErr);
-        if (!res.headersSent) {
-          res.status(502).end();
-        }
-      }
-    } else {
-      // Stream interface fallback
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      if (chunkCache.size >= MAX_CACHE_SIZE) {
-        const oldestKey = chunkCache.keys().next().value;
-        if (oldestKey !== undefined) {
-          chunkCache.delete(oldestKey);
-        }
-      }
-      chunkCache.set(targetUrl, { buffer, contentType, addedAt: Date.now() });
-      
-      res.send(buffer);
-    }
-  } catch (err: any) {
-    console.error("Error proxying chunk:", err);
-    if (!res.headersSent) {
-      res.status(500).send(`Chunk proxy error: ${err.message}`);
-    }
-  }
-});
-
-async function start() {
-  const distPath = path.join(process.cwd(), "dist");
-  const hasDist = fs.existsSync(distPath);
-
-  // If explicitly in development OR built assets don't exist yet, run as dev server.
-  // Otherwise, serve pre-compiled high-performance assets statically.
-  if (process.env.NODE_ENV === "development" || !hasDist) {
+async function startServer() {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-start();
+startServer();

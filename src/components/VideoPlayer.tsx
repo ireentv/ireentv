@@ -1,458 +1,262 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import Hls from "hls.js";
+import React, { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { 
-  Play, 
-  Pause, 
-  Volume2, 
-  VolumeX, 
-  Maximize, 
-  Minimize, 
-  RotateCcw, 
-  Tv, 
-  AlertTriangle, 
-  Loader2, 
-  CheckCircle,
-  HelpCircle,
-  Settings,
-  X
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
-import { Channel } from "../types";
+  Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, 
+  RotateCcw, AlertTriangle, Monitor, Tv, Info, Settings, Sparkles
+} from 'lucide-react';
+import { Channel } from '../types';
 
 interface VideoPlayerProps {
+  key?: string;
   channel: Channel | null;
-  isStaticMode?: boolean;
+  activeUrl?: string;
+  onPrev?: () => void;
+  onNext?: () => void;
   onClose?: () => void;
 }
 
-interface PlayQuality {
-  index: number;
-  height: number;
-  bitrate: number;
-  name?: string;
-}
-
-export default function VideoPlayer({ channel, isStaticMode = false, onClose }: VideoPlayerProps) {
+export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isTheater, setIsTheater] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | 'fit'>('16:9');
   const [showControls, setShowControls] = useState(true);
-  const [retryCount, setRetryCount] = useState(0);
-  const [connectionMode, setConnectionMode] = useState<"auto" | "proxy" | "direct">("auto");
-  const [useProxy, setUseProxy] = useState(!isStaticMode);
-  const [hasAutoFlipped, setHasAutoFlipped] = useState(false);
-  const [selectedServer, setSelectedServer] = useState<1 | 2 | 3>(1);
+  const controlsTimeoutRef = useRef<number | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [streamMode, setStreamMode] = useState<'direct' | 'proxy'>('direct');
+  const [playMode, setPlayMode] = useState<'auto' | 'direct' | 'proxy'>('auto');
 
-  const cycleConnectionMode = useCallback(() => {
-    setConnectionMode((prev) => {
-      if (prev === "auto") return "direct";
-      if (prev === "direct") return "proxy";
-      return "auto";
-    });
-  }, []);
-
-  // Keep ref of isPlaying to bypass closures in setTimeout
-  const isPlayingRef = useRef(false);
+  // Single Unified Effect for loading and playing streams
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
+    const video = videoRef.current;
+    if (!video || !channel) return;
 
-  // Synchronize useProxy whenever connectionMode, channel, selectedServer, or isStaticMode changes
-  useEffect(() => {
-    const activeLink = 
-      selectedServer === 3 && channel?.link3 
-        ? channel.link3 
-        : selectedServer === 2 && channel?.link2 
-        ? channel.link2 
-        : channel?.link;
-
-    const isHttp = activeLink?.startsWith("http://");
-
-    if (isHttp) {
-      setUseProxy(true);
-    } else if (connectionMode === "proxy") {
-      setUseProxy(true);
-    } else if (connectionMode === "direct") {
-      setUseProxy(false);
-    } else {
-      // In auto mode, we first try to play DIRECT (false). If it fails, we will flip to proxy (true)
-      setUseProxy(false);
-    }
-  }, [connectionMode, channel, selectedServer]);
-
-  // Reset auto-change attempts when stream source variables change
-  useEffect(() => {
-    setHasAutoFlipped(false);
-  }, [channel, selectedServer, connectionMode]);
-
-  // Automatic Direct/Proxy mode watchdog switcher
-  useEffect(() => {
-    if (connectionMode !== "auto") return;
-    if (isPlaying) return; // Channel is already playing!
-
-    // Start a watchdog timer to failover if loading takes too long
-    const watchdogTimer = setTimeout(() => {
-      if (!isPlayingRef.current && !hasAutoFlipped) {
-        console.warn("Watchdog: Channel loading took too long without video active. Switching to proxy mode automatically...");
-        setHasAutoFlipped(true);
-        setUseProxy(true); // Explicitly switch to proxy mode
-      }
-    }, 6000); // 6 seconds threshold to try alternative streaming mode
-
-    return () => clearTimeout(watchdogTimer);
-  }, [channel, selectedServer, connectionMode, isPlaying, hasAutoFlipped]);
-
-  // Reset auto-flip state on channel change & request automatic fullscreen on Android Smart TV
-  useEffect(() => {
-    setSelectedServer(1);
-
-    // Dynamic helper to identify if the user is loading from an Android Smart TV device
-    const isAndroidSmartTV = () => {
-      if (typeof window === "undefined" || !navigator || !navigator.userAgent) return false;
-      const ua = navigator.userAgent.toLowerCase();
-      // Look for Android signature combined with tv/leanback/box/large screen signatures
-      const hasAndroid = ua.includes("android") || ua.includes("googletv") || ua.includes("leanback");
-      const hasTVSignature = ua.includes("tv") || 
-                             ua.includes("smarttv") || 
-                             ua.includes("appletv") || 
-                             ua.includes("firetv") || 
-                             ua.includes("box") || 
-                             ua.includes("large") || 
-                             ua.includes("mibox") || 
-                             ua.includes("aftn") || 
-                             ua.includes("aftb") || 
-                             ua.includes("shield");
-      return hasAndroid && hasTVSignature;
-    };
-
-    if (channel && isAndroidSmartTV()) {
-      const enterTVFullscreen = () => {
-        const container = containerRef.current;
-        const video = videoRef.current;
-        if (container) {
-          if (container.requestFullscreen) {
-            container.requestFullscreen()
-              .then(() => setIsFullscreen(true))
-              .catch((err) => {
-                console.warn("TV Container Fullscreen request failed/deferred:", err);
-                if (video && (video as any).webkitEnterFullscreen) {
-                  try {
-                    (video as any).webkitEnterFullscreen();
-                    setIsFullscreen(true);
-                  } catch (e) {}
-                }
-              });
-          } else if ((container as any).webkitRequestFullscreen) {
-            try {
-              (container as any).webkitRequestFullscreen();
-              setIsFullscreen(true);
-            } catch (e) {}
-          } else if (video && (video as any).webkitEnterFullscreen) {
-            try {
-              (video as any).webkitEnterFullscreen();
-              setIsFullscreen(true);
-            } catch (e) {}
-          }
-        }
-      };
-
-      // Slight timeout to let DOM mount completely and load the resource
-      const timer = setTimeout(enterTVFullscreen, 350);
-      return () => clearTimeout(timer);
-    }
-  }, [channel]);
-
-  // Buffer Quality state variables
-  const [levels, setLevels] = useState<PlayQuality[]>([]);
-  const [currentLevelIndex, setCurrentLevelIndex] = useState<number>(-1); // -1 means Auto (Adaptive bitrate)
-  const [activeLevelIndex, setActiveLevelIndex] = useState<number>(0);
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
-
-  // Auto-hide controls timer
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const resetControlsTimeout = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-    }
-    controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlayingRef.current) {
-        setShowControls(false);
-      }
-    }, 4000);
-  }, []);
-
-  // Register isPlaying effect to handle automatic countdown when active channel starts playing
-  useEffect(() => {
-    if (isPlaying) {
-      resetControlsTimeout();
-    } else {
-      setShowControls(true);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    }
-  }, [isPlaying, resetControlsTimeout]);
-
-  useEffect(() => {
-    return () => {
-      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    };
-  }, []);
-
-  // Construct proxied stream URL
-  const getProxiedUrl = (chan: Channel, serverNum: 1 | 2 | 3) => {
-    let streamLink = chan.link;
-    let refVal = chan.referer;
-    let origVal = chan.origin;
-    let cookieVal = chan.cookie || "";
-    let uaVal = chan.ua || "";
-    let hostVal = chan.host || "";
-
-    if (serverNum === 2) {
-      streamLink = chan.link2 || chan.link;
-      refVal = chan.referer2 || chan.referer;
-      origVal = chan.origin2 || chan.origin;
-      cookieVal = chan.cookie2 || "";
-      uaVal = chan.ua2 || "";
-      hostVal = chan.host2 || "";
-    } else if (serverNum === 3) {
-      streamLink = chan.link3 || chan.link;
-      refVal = chan.referer3 || chan.referer;
-      origVal = chan.origin3 || chan.origin;
-      cookieVal = chan.cookie3 || "";
-      uaVal = chan.ua3 || "";
-      hostVal = chan.host3 || "";
-    }
-
-    const encodedUrl = encodeURIComponent(streamLink);
-    const referer = refVal ? encodeURIComponent(refVal) : "https%3A%2F%2Fexecuteandship.com%2F";
-    const origin = origVal ? encodeURIComponent(origVal) : "https%3A%2F%2Fexecuteandship.com";
-    
-    let baseProxy = `/api/hls/stream.m3u8?url=${encodedUrl}&referer=${referer}&origin=${origin}`;
-    if (cookieVal) baseProxy += `&cookie=${encodeURIComponent(cookieVal)}`;
-    if (uaVal) baseProxy += `&ua=${encodeURIComponent(uaVal)}`;
-    if (hostVal) baseProxy += `&host=${encodeURIComponent(hostVal)}`;
-    return baseProxy;
-  };
-
-  const tryNextServer = useCallback(() => {
-    if (!channel) return false;
-    const available: number[] = [1];
-    if (channel.link2) available.push(2);
-    if (channel.link3) available.push(3);
-
-    const currentIndex = available.indexOf(selectedServer);
-    if (currentIndex !== -1 && currentIndex < available.length - 1) {
-      const nextServer = available[currentIndex + 1] as 1 | 2 | 3;
-      console.warn(`Server ${selectedServer} failed. Automatically falling back to Server ${nextServer}...`);
-      setErrorMsg(`সার্ভার ${selectedServer} ব্যর্থ হয়েছে। সার্ভার ${nextServer}-এ অটোমেটিক রিডাইরেক্ট করা হচ্ছে...`);
-      setSelectedServer(nextServer);
-      return true;
-    }
-    return false;
-  }, [channel, selectedServer]);
-
-  const initPlayer = useCallback(() => {
-    if (!channel || !videoRef.current) return;
-
-    setErrorMsg(null);
-    setIsLoading(true);
+    // Reset UI states immediately for a fresh load experience
+    setIsBuffering(true);
+    setError(null);
     setIsPlaying(false);
-    setLevels([]);
-    setCurrentLevelIndex(-1);
-    setActiveLevelIndex(0);
-    setShowQualityMenu(false);
 
-    const activeLink = 
-      selectedServer === 3 && channel.link3 
-        ? channel.link3 
-        : selectedServer === 2 && channel.link2 
-        ? channel.link2 
-        : channel.link;
-    if (!activeLink) {
-      setIsLoading(false);
-      setErrorMsg("আসন্ন ম্যাচ - সম্প্রচার এখনও শুরু হয়নি। অনুগ্রহ করে ম্যাচ সূচি অনুযায়ী যথাসময়ে পুনরায় প্লে করুন।");
-      return;
-    }
-    // If useProxy is active, proxy stream. Otherwise play direct from browser (extremely helpful for geo-blocked streams).
-    const streamUrl = useProxy ? getProxiedUrl(channel, selectedServer) : activeLink;
-
-    // Destroy existing HLS instance
+    // Clean up previous HLS instance completely
     if (hlsRef.current) {
-      hlsRef.current.destroy();
+      try {
+        hlsRef.current.destroy();
+      } catch (e) {
+        console.warn('Error destroying HLS instance on URL change:', e);
+      }
       hlsRef.current = null;
     }
+    
+    // Completely clear out any legacy stream tracks and src to prepare for the fresh URL load
+    video.pause();
+    video.removeAttribute('src');
+    try {
+      video.load();
+    } catch (e) {
+      console.warn('Error reloading video element src:', e);
+    }
 
-    const video = videoRef.current;
+    const streamUrl = activeUrl || channel.url;
+    const directUrl = streamUrl;
+    const proxiedUrl = `/api/stream-proxy?url=${encodeURIComponent(streamUrl)}`;
+    
+    // Auto-detect if we must use the proxy because of HTTP under HTTPS
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const isHttpUrl = streamUrl.startsWith('http://');
+    const mustUseProxy = isHttps && isHttpUrl;
 
-    // Use HLS.js first for optimized MSE adaptive playback (improves Android, Chrome, Firefox, Edge performance)
-    if (Hls.isSupported()) {
-      // Use HLS.js
-      // Highly optimized for ultra-fast startup and buffer-free live sports playback on weak connections.
-      const hls = new Hls({
-        maxBufferLength: 60,             // 1 Mbps speeds require longer precached buffers (increased from 20 to 60)
-        maxMaxBufferLength: 120,         // Keep up to 120 secs of video in RAM during peak download bursts
-        maxBufferSize: 60 * 1024 * 1024, // Allocate up to 60MB of video cache budget
-        enableWorker: true,
-        lowLatencyMode: false,           // Favour buffer depth/growth over low latency for 1 Mbps lines
-        backBufferLength: 15,            
-        fragLoadingMaxRetry: 15,         // More tolerance on weak cellular/broadband lines
-        manifestLoadingMaxRetry: 15,     
-        fragLoadingRetryDelay: 1000,     
-        manifestLoadingRetryDelay: 1000,  
-        liveSyncDurationCount: 6,        // Start 6 segments back from the live edge (increases buffer pad to absorb fluctuations)
-        liveMaxLatencyDurationCount: 15, // Let player fall further behind live stream without skipping/stuttering
-        abrEwmaDefaultEstimate: 90000,   // Low starting bandwidth default (90kbps) for instant, stutter-free playback start
-        startLevel: -1,                  // Adaptive Bitrate enabled to pick the most reliable resolution automatically
-        capLevelToPlayerSize: true,      // Conserves bandwidth by limiting high-res on smaller screens
-        abrBandWidthFactor: 0.60,        // Conservative margin (40% discount) to prevent upward switches that choke 1 Mbps lines
-        abrBandWidthUpFactor: 0.40,      // Requires extremely consistent high throughput before switching to HD quality
-        nudgeMaxRetry: 12,               // Autorecover stuck playback fast by nudging video playhead forward
-        testBandwidth: true,             
-        highBufferWatchdogPeriod: 3,     
-        maxBufferHole: 1.5,              // Safely bypass tiny packet/delivery dropouts up to 1.5s natively
-        maxFragLookUpTolerance: 0.3,
-        fragLoadingTimeOut: 20000,       // Extended timeout to support slow segment retrieval on 1 Mbps networks
-        manifestLoadingTimeOut: 20000
+    // Determine player URL and initial mode based on playMode
+    let playerUrl = directUrl;
+    let initialMode: 'direct' | 'proxy' = 'direct';
+    let hasSwitchedToProxy = false;
+
+    if (playMode === 'proxy' || mustUseProxy) {
+      playerUrl = proxiedUrl;
+      initialMode = 'proxy';
+      hasSwitchedToProxy = true;
+    } else if (playMode === 'direct') {
+      playerUrl = directUrl;
+      initialMode = 'direct';
+      hasSwitchedToProxy = false;
+    } else {
+      // playMode === 'auto'
+      playerUrl = directUrl;
+      initialMode = 'direct';
+      hasSwitchedToProxy = false;
+    }
+
+    setStreamMode(initialMode);
+
+    let networkErrorRetryCount = 0;
+    let otherErrorRetryCount = 0;
+    let fallbackTimeout: NodeJS.Timeout | null = null;
+
+    const clearRecoveryTimeout = () => {
+      if (fallbackTimeout) {
+        clearTimeout(fallbackTimeout);
+        fallbackTimeout = null;
+      }
+    };
+
+    // Smart recovery timeout: if stream does not play within 4.5 seconds, auto-fallback to proxy
+    const startFallbackTimeout = (hlsInstance?: Hls) => {
+      clearRecoveryTimeout();
+      fallbackTimeout = setTimeout(() => {
+        if (!hasSwitchedToProxy && !isPlaying) {
+          console.log('Stream loading timed out in direct mode. Automatically switching to Secure Proxy Server...');
+          hasSwitchedToProxy = true;
+          setStreamMode('proxy');
+          if (hlsInstance) {
+            hlsInstance.loadSource(proxiedUrl);
+            hlsInstance.startLoad();
+          } else {
+            video.src = proxiedUrl;
+            video.load();
+          }
+        }
+      }, 4500);
+    };
+
+    // Standard video event listeners
+    const handlePlay = () => {
+      clearRecoveryTimeout();
+      setIsPlaying(true);
+    };
+    const handlePause = () => setIsPlaying(false);
+    const handleWaiting = () => setIsBuffering(true);
+    const handlePlayingEvent = () => {
+      clearRecoveryTimeout();
+      setIsBuffering(false);
+    };
+
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlayingEvent);
+
+    const handleNativeLoadedMetadata = () => {
+      clearRecoveryTimeout();
+      video.play().then(() => {
+        setIsPlaying(true);
+        setIsBuffering(false);
+      }).catch((err) => {
+        console.warn('Playback blocked or failed natively:', err);
+        setIsPlaying(false);
+        setIsBuffering(false);
       });
+    };
 
+    const handleNativeError = () => {
+      if (!hasSwitchedToProxy) {
+        console.log('Native video player error, attempting proxy fallback...');
+        clearRecoveryTimeout();
+        hasSwitchedToProxy = true;
+        setStreamMode('proxy');
+        video.src = proxiedUrl;
+        video.load();
+      } else {
+        setError('Unable to play this channel. It may be offline or temporarily unavailable.');
+        setIsBuffering(false);
+      }
+    };
+
+    // Setup HLS or Native Player
+    const isM3U8Stream = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
+    
+    if (Hls.isSupported() && isM3U8Stream) {
+      const hls = new Hls({
+        abrEwmaDefaultEstimate: 180000, 
+        maxBufferLength: 8,
+        maxMaxBufferLength: 15,
+        backBufferLength: 5,
+        maxBufferSize: 6 * 1024 * 1024,
+        maxBufferHole: 2.0,
+        nudgeMaxRetry: 15,
+        enableWorker: true,
+        lowLatencyMode: true,
+        manifestLoadingMaxRetry: 10,
+        manifestLoadingRetryDelay: 500,
+        fragLoadingMaxRetry: 15,
+        fragLoadingRetryDelay: 500,
+        levelLoadingMaxRetry: 10,
+        levelLoadingRetryDelay: 500,
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.7,
+      });
       hlsRef.current = hls;
-      hls.loadSource(streamUrl);
+
+      hls.loadSource(playerUrl);
       hls.attachMedia(video);
 
-      let networkRetryCount = 0;
-      let mediaRetryCount = 0;
-      let networkRetryTimeout: NodeJS.Timeout | null = null;
-      let loadingTimeout: NodeJS.Timeout | null = null;
-
-      // Handle standard HTML5 video element events for state synchronization
-      const onPlay = () => {
-        setIsPlaying(true);
-      };
-      
-      // Debounce loading indicator overlay to prevent screen flashing on minor millisecond network drops
-      const onWaiting = () => {
-        if (!loadingTimeout) {
-          loadingTimeout = setTimeout(() => {
-            setIsLoading(true);
-          }, 700); // Hides unnecessary spinners during tiny buffering fluctuations
-        }
-      };
-      
-      const onPlaying = () => {
-        if (loadingTimeout) {
-          clearTimeout(loadingTimeout);
-          loadingTimeout = null;
-        }
-        setIsPlaying(true);
-        setIsLoading(false);
-      };
-      
-      const onCanPlay = () => {
-        if (loadingTimeout) {
-          clearTimeout(loadingTimeout);
-          loadingTimeout = null;
-        }
-        setIsLoading(false);
-      };
-
-      video.addEventListener("play", onPlay);
-      video.addEventListener("waiting", onWaiting);
-      video.addEventListener("playing", onPlaying);
-      video.addEventListener("canplay", onCanPlay);
+      startFallbackTimeout(hls);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
-        if (hls.levels && hls.levels.length > 0) {
-          const parsedLevels = hls.levels.map((lvl, idx) => ({
-            index: idx,
-            height: lvl.height || 0,
-            bitrate: lvl.bitrate || 0,
-            name: lvl.name || ""
-          }));
-          setLevels(parsedLevels);
-          setCurrentLevelIndex(hls.currentLevel); // Index -1 means Auto by default
-        } else {
-          setLevels([]);
-        }
-
+        clearRecoveryTimeout();
         video.play().then(() => {
           setIsPlaying(true);
-        }).catch(() => {
+          setIsBuffering(false);
+        }).catch((err) => {
+          console.warn('Playback blocked or failed in HLS.js:', err);
           setIsPlaying(false);
+          setIsBuffering(false);
         });
       });
 
-      // Hook up level switched event to detect and display change of playing quality in Real-time
-      hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-        if (typeof data.level === "number") {
-          setActiveLevelIndex(data.level);
-        }
-      });
-
       hls.on(Hls.Events.ERROR, (event, data) => {
-        console.error("HLS.JS Error detail:", data);
-        
-        // Buffer Stall event occurs - let HLS.js manage recovery natively inside the browser to avoid recursive loops
-        if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
-          console.warn("Buffer stall detected. Relying on HLS.js adaptive fallback and native nudging.");
-        }
-
+        console.warn('HLS.js error encountered:', data);
         if (data.fatal) {
-          // If a fatal stream error occurs, and we haven't flipped connection type yet, try automatic flip (only if mode is auto)
-          if (connectionMode === "auto" && !hasAutoFlipped) {
-            setHasAutoFlipped(true);
-            setUseProxy(true); // Explicitly switch to proxy mode
-            console.warn(`Fatal HLS error (${data.type}) detected. Attempting automatic connection mode flip...`);
-            return;
-          }
-
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              if (networkRetryCount < 5) {
-                networkRetryCount++;
-                console.warn(`Fatal HLS network error (attempt ${networkRetryCount}/5). Retrying stream load...`);
-                setIsLoading(true);
-                networkRetryTimeout = setTimeout(() => {
-                  if (hlsRef.current) {
-                    hlsRef.current.startLoad();
-                  }
-                }, networkRetryCount * 1500);
+              networkErrorRetryCount++;
+              console.log(`Fatal network error (retry ${networkErrorRetryCount}/3)...`);
+              if (!hasSwitchedToProxy) {
+                console.log('Self-healing mechanism: Switching stream to secure proxy server...');
+                clearRecoveryTimeout();
+                hasSwitchedToProxy = true;
+                setStreamMode('proxy');
+                hls.loadSource(proxiedUrl);
+                hls.startLoad();
+              } else if (networkErrorRetryCount <= 3) {
+                hls.startLoad();
               } else {
-                if (!tryNextServer()) {
-                  setIsLoading(false);
-                  setErrorMsg("সাময়িক কানেকশন বিচ্ছিন্নতা! অনুগ্রহ করে রিফ্রেশ বাটন প্রেস করুন বা অন্য কোনো চ্যানেল ট্রাই করুন।");
-                }
+                setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
+                setIsBuffering(false);
+                hls.destroy();
+                hlsRef.current = null;
               }
               break;
+              
             case Hls.ErrorTypes.MEDIA_ERROR:
-              if (mediaRetryCount < 5) {
-                mediaRetryCount++;
-                console.warn(`Fatal HLS media error (attempt ${mediaRetryCount}/5). Recovering media...`);
-                setIsLoading(true);
+              otherErrorRetryCount++;
+              console.log('Fatal media error, attempting recovery...');
+              if (otherErrorRetryCount <= 3) {
                 hls.recoverMediaError();
               } else {
-                console.warn("Multiple media errors encountered. Attempting fallback server...");
-                if (!tryNextServer()) {
-                  mediaRetryCount = 0;
-                  initPlayer();
-                }
+                setError('Unable to play this channel. The stream format is not supported or corrupted.');
+                setIsBuffering(false);
+                hls.destroy();
+                hlsRef.current = null;
               }
               break;
+              
             default:
-              console.error("Unrecoverable HLS error type:", data.type);
-              if (!tryNextServer()) {
-                setIsLoading(false);
-                setErrorMsg("প্লেয়ারে অভ্যন্তরীণ সমস্যা হয়েছে। অনুগ্রহ করে রিফ্রেশ করুন।");
+              if (!hasSwitchedToProxy) {
+                console.log('Fatal unknown error, attempting proxy fallback...');
+                clearRecoveryTimeout();
+                hasSwitchedToProxy = true;
+                setStreamMode('proxy');
+                hls.loadSource(proxiedUrl);
+                hls.startLoad();
+              } else {
+                setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
+                setIsBuffering(false);
                 hls.destroy();
                 hlsRef.current = null;
               }
@@ -460,647 +264,451 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
           }
         }
       });
-
-      return () => {
-        if (networkRetryTimeout) clearTimeout(networkRetryTimeout);
-        if (loadingTimeout) clearTimeout(loadingTimeout);
-        video.removeEventListener("play", onPlay);
-        video.removeEventListener("waiting", onWaiting);
-        video.removeEventListener("playing", onPlaying);
-        video.removeEventListener("canplay", onCanPlay);
-        hls.destroy();
-        hlsRef.current = null;
-      };
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Direct playback if browser supports HLS natively (Safari / iOS)
-      video.src = streamUrl;
-      video.load();
-      
-      let nativeRetryCount = 0;
-      let nativeRetryTimeout: NodeJS.Timeout | null = null;
-      let nativeLoadingTimeout: NodeJS.Timeout | null = null;
-
-      const onPlay = () => {
-        if (nativeLoadingTimeout) {
-          clearTimeout(nativeLoadingTimeout);
-          nativeLoadingTimeout = null;
-        }
-        setIsPlaying(true);
-        setIsLoading(false);
-      };
-      
-      const onWaiting = () => {
-        if (!nativeLoadingTimeout) {
-          nativeLoadingTimeout = setTimeout(() => {
-            setIsLoading(true);
-          }, 700); // 700ms debounce of loader on Safari
-        }
-      };
-      
-      const onPlaying = () => {
-        if (nativeLoadingTimeout) {
-          clearTimeout(nativeLoadingTimeout);
-          nativeLoadingTimeout = null;
-        }
-        setIsPlaying(true);
-        setIsLoading(false);
-      };
-      
-      const onError = () => {
-        console.error("Native HTML5 video error:", video.error);
-        if (connectionMode === "auto" && !hasAutoFlipped) {
-          setHasAutoFlipped(true);
-          setUseProxy(true); // Explicitly switch to proxy mode
-          console.warn("Fatal native error detected. Attempting automatic connection mode flip...");
-          return;
-        }
-
-        if (nativeRetryCount < 5) {
-          nativeRetryCount++;
-          console.warn(`Native playback error (attempt ${nativeRetryCount}/5). Auto-retrying...`);
-          setIsLoading(true);
-          nativeRetryTimeout = setTimeout(() => {
-            if (videoRef.current) {
-              videoRef.current.src = streamUrl;
-              videoRef.current.load();
-              videoRef.current.play().then(() => {
-                setIsPlaying(true);
-                setIsLoading(false);
-              }).catch((e) => {
-                console.warn("Autoplay block or delay on native restart:", e);
-                setIsPlaying(false);
-                setIsLoading(false);
-              });
-            }
-          }, 2000);
-        } else {
-          if (!tryNextServer()) {
-            setErrorMsg("প্লেব্যাকে ত্রুটি দেখা দিয়েছে। অনুগ্রহ করে পুনরায় চেষ্টা করুন বা পেইজটি রিফ্রেশ করুন।");
-            setIsLoading(false);
-          }
-        }
-      };
-
-      video.addEventListener("play", onPlay);
-      video.addEventListener("waiting", onWaiting);
-      video.addEventListener("playing", onPlaying);
-      video.addEventListener("error", onError);
-
-      // Attempt autoplay
-      video.play().catch(() => {
-        setIsPlaying(false);
-        setIsLoading(false);
-      });
-
-      return () => {
-        if (nativeRetryTimeout) clearTimeout(nativeRetryTimeout);
-        if (nativeLoadingTimeout) clearTimeout(nativeLoadingTimeout);
-        video.removeEventListener("play", onPlay);
-        video.removeEventListener("waiting", onWaiting);
-        video.removeEventListener("playing", onPlaying);
-        video.removeEventListener("error", onError);
-      };
     } else {
-      setIsLoading(false);
-      setErrorMsg("আপনার ব্রাউজারে HLS স্ট্রিমিং সাপোর্ট করে না।");
+      // Fallback for native HLS (like Safari) or MP4 streams
+      video.src = playerUrl;
+      video.addEventListener('loadedmetadata', handleNativeLoadedMetadata);
+      video.addEventListener('error', handleNativeError);
+      startFallbackTimeout();
     }
-  }, [channel, retryCount, useProxy, hasAutoFlipped, selectedServer, connectionMode, tryNextServer]);
+
+    return () => {
+      clearRecoveryTimeout();
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch (e) {
+          console.warn('Error destroying HLS on cleanup:', e);
+        }
+        hlsRef.current = null;
+      }
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlayingEvent);
+      video.removeEventListener('loadedmetadata', handleNativeLoadedMetadata);
+      video.removeEventListener('error', handleNativeError);
+    };
+  }, [channel, activeUrl, reloadToken, playMode]);
+
+  // Volume handler
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  // Handle auto-hide controls
+  const triggerShowControls = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      window.clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = window.setTimeout(() => {
+      if (isPlaying) {
+        setShowControls(false);
+      }
+    }, 3000);
+  };
 
   useEffect(() => {
-    const cleanup = initPlayer();
-    // Auto-show controls when changing channel
-    setShowControls(true);
+    triggerShowControls();
     return () => {
-      if (cleanup) cleanup();
+      if (controlsTimeoutRef.current) window.clearTimeout(controlsTimeoutRef.current);
     };
-  }, [channel, retryCount, useProxy, selectedServer, initPlayer, connectionMode]);
+  }, [isPlaying]);
 
-  // Video controller handlers
   const togglePlay = () => {
     const video = videoRef.current;
-    if (!video || isLoading) return;
+    if (!video) return;
 
     if (isPlaying) {
       video.pause();
-      setIsPlaying(false);
     } else {
-      video.play().then(() => {
-        setIsPlaying(true);
-        setErrorMsg(null);
-      }).catch((err) => {
-        console.error("Autoplay/Play blocked:", err);
-      });
-    }
-    resetControlsTimeout();
-  };
-
-  const handleVideoClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (showControls) {
-      setShowControls(false);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    } else {
-      resetControlsTimeout();
+      video.play().catch(() => {});
     }
   };
 
   const toggleMute = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const nextMute = !isMuted;
-    video.muted = nextMute;
-    setIsMuted(nextMute);
-    if (!nextMute && volume === 0) {
-      updateVolume(0.5);
-    }
-    resetControlsTimeout();
+    setIsMuted(!isMuted);
   };
 
-  const updateVolume = (val: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.volume = val;
-    setVolume(val);
-    if (val === 0) {
-      video.muted = true;
-      setIsMuted(true);
-    } else {
-      video.muted = false;
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value);
+    setVolume(value);
+    if (value > 0) {
       setIsMuted(false);
     }
-    resetControlsTimeout();
   };
 
   const toggleFullscreen = () => {
     const container = containerRef.current;
-    const video = videoRef.current;
     if (!container) return;
 
-    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
-      if (container.requestFullscreen) {
-        container.requestFullscreen().then(() => {
-          setIsFullscreen(true);
-        }).catch(err => {
-          console.warn("Container fullscreen failed, falling back to video element:", err);
-          if (video && (video as any).webkitEnterFullscreen) {
-            (video as any).webkitEnterFullscreen();
-          } else if (video && video.requestFullscreen) {
-            video.requestFullscreen();
-          }
-        });
-      } else if (video && (video as any).webkitEnterFullscreen) {
-        try {
-          (video as any).webkitEnterFullscreen();
-          setIsFullscreen(true);
-        } catch (err) {
-          console.error("webkitEnterFullscreen error:", err);
-        }
-      } else if (video && video.requestFullscreen) {
-        video.requestFullscreen().then(() => {
-          setIsFullscreen(true);
-        }).catch(err => {
-          console.error("Video fullscreen error:", err);
-        });
-      }
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => {
+        console.error('Fullscreen request failed:', err);
+      });
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().then(() => {
-          setIsFullscreen(false);
-        }).catch(() => {});
-      } else if ((document as any).webkitExitFullscreen) {
-        (document as any).webkitExitFullscreen();
+      document.exitFullscreen().then(() => {
         setIsFullscreen(false);
-      }
+      });
     }
-    resetControlsTimeout();
   };
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
-      setIsFullscreen(isCurrentlyFullscreen);
-
-      const orientation = screen.orientation as any;
-      if (isCurrentlyFullscreen) {
-        // Attempt to automatically rotate to landscape orientation on mobile devices
-        if (orientation && typeof orientation.lock === "function") {
-          orientation.lock("landscape").catch((err: any) => {
-            console.warn("Orientation lock failed/unsupported on this device/browser:", err);
-          });
-        } else if ((screen as any).mozLockOrientation) {
-          (screen as any).mozLockOrientation("landscape");
-        } else if ((screen as any).msLockOrientation) {
-          (screen as any).msLockOrientation("landscape");
-        }
-      } else {
-        // Unlock orientation back to user defaults when exiting fullscreen
-        if (orientation && typeof orientation.unlock === "function") {
-          try {
-            orientation.unlock();
-          } catch (err) {
-            console.warn("Orientation unlock failed:", err);
-          }
-        } else if ((screen as any).mozUnlockOrientation) {
-          (screen as any).mozUnlockOrientation();
-        } else if ((screen as any).msUnlockOrientation) {
-          (screen as any).msUnlockOrientation();
-        }
-      }
+      setIsFullscreen(!!document.fullscreenElement);
     };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-
-    const video = videoRef.current;
-    const handleWebKitBegin = () => {
-      setIsFullscreen(true);
-      // For legacy iOS WebKit presentation/entering fullscreen
-      const orientation = screen.orientation as any;
-      if (orientation && typeof orientation.lock === "function") {
-        orientation.lock("landscape").catch(() => {});
-      }
-    };
-    const handleWebKitEnd = () => {
-      setIsFullscreen(false);
-      const orientation = screen.orientation as any;
-      if (orientation && typeof orientation.unlock === "function") {
-        try {
-          orientation.unlock();
-        } catch (_) {}
-      }
-    };
-
-    if (video) {
-      video.addEventListener("webkitbeginfullscreen", handleWebKitBegin);
-      video.addEventListener("webkitendfullscreen", handleWebKitEnd);
-    }
-
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      if (video) {
-        video.removeEventListener("webkitbeginfullscreen", handleWebKitBegin);
-        video.removeEventListener("webkitendfullscreen", handleWebKitEnd);
-      }
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
-  const handleRefresh = () => {
-    setRetryCount(prev => prev + 1);
-    resetControlsTimeout();
+  const handleReload = () => {
+    setIsBuffering(true);
+    setError(null);
+    setReloadToken(prev => prev + 1);
   };
 
-  const handleQualityChange = (levelIdx: number) => {
-    setCurrentLevelIndex(levelIdx);
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = levelIdx;
+  const getAspectRatioClass = () => {
+    switch (aspectRatio) {
+      case '4:3':
+        return 'aspect-[4/3] object-contain';
+      case 'fit':
+        return 'w-full h-full object-fill';
+      case '16:9':
+      default:
+        return 'aspect-[16/9] object-contain';
     }
-    setShowQualityMenu(false);
-    resetControlsTimeout();
   };
-
-  const activeLevelHeight = levels.length > 0 && levels[activeLevelIndex] 
-    ? `${levels[activeLevelIndex].height}p` 
-    : "Auto";
 
   return (
-    <div 
-      id="video-player-root"
-      ref={containerRef}
-      onMouseMove={resetControlsTimeout}
-      onMouseLeave={() => isPlaying && setShowControls(false)}
-      className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden border border-zinc-900 shadow-2xl group select-none"
-    >
-      {/* Actual Video Tag */}
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain pointer-events-auto cursor-pointer"
-        onClick={handleVideoClick}
-        playsInline
-      />
-
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center gap-4 z-20">
-          <Loader2 className="w-12 h-12 text-[#E50914] animate-spin" />
-          <p className="font-sans text-slate-300 text-sm animate-pulse">
-            Loading stream, please wait...
-          </p>
-        </div>
-      )}
-
-      {/* Error Overlay */}
-      {errorMsg && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center gap-3 md:gap-4 z-20">
-          <AlertTriangle className="w-12 h-12 md:w-16 md:h-16 text-rose-500 animate-bounce cursor-pointer shrink-0" />
-          <h3 className="font-sans font-bold text-base md:text-lg text-rose-450 uppercase tracking-tight">Stream Connection Failed</h3>
-          <p className="font-sans text-slate-300 text-xs md:text-sm max-w-md line-clamp-2 md:line-clamp-none">
-            {errorMsg}
-          </p>
-          {isStaticMode && (
-            <div className="text-amber-400 text-[10px] md:text-xs max-w-sm bg-[#1c1912] p-2 md:p-3 rounded-lg border border-amber-900/40 font-medium leading-relaxed leading-medium select-text shrink-0">
-              ⚠️ Cloudflare Pages-এ ব্যাকএ্যান্ড সার্ভার না থাকায় প্লে করতে ব্রাউজারে "Allow CORS" এক্সটেনশন ব্রাউজ করতে পারেন, অথবা নিচে "Direct" মোড দিন। ১০০% সচল রাখতে Render-এ Express সহ ব্যাকএন্ড ডিপ্লয় করুন।
+    <div id="video-player-root" className="flex flex-col gap-3">
+      {/* Active channel details banner */}
+      {channel && (
+        <div id="channel-details-header" className="flex items-center justify-between bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-zinc-800/80 flex items-center justify-center p-1.5 border border-zinc-700/50 overflow-hidden shrink-0">
+              {channel.logo ? (
+                <img 
+                  src={channel.logo} 
+                  alt={channel.name} 
+                  className="max-w-full max-h-full object-contain"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    // Fallback to default Lucide icon
+                    (e.target as HTMLImageElement).style.display = 'none';
+                    const parent = (e.target as HTMLImageElement).parentElement;
+                    if (parent) {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'text-emerald-400 font-bold text-lg';
+                      fallback.innerText = channel.name.charAt(0);
+                      parent.appendChild(fallback);
+                    }
+                  }}
+                />
+              ) : (
+                <div className="text-emerald-400 font-bold text-lg">{channel.name.charAt(0)}</div>
+              )}
             </div>
-          )}
-          <div className="flex gap-2.5 md:gap-3 mt-1.5 md:mt-2 flex-wrap justify-center shrink-0">
-            <button
-              onClick={handleRefresh}
-              className="flex items-center gap-2 px-4 py-2 md:px-5 md:py-2.5 bg-[#E50914] hover:bg-red-700 text-white font-sans text-xs md:text-sm font-semibold rounded-full transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-lg shadow-red-900/30"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> Try Again
-            </button>
-            <button
-              onClick={() => {
-                cycleConnectionMode();
-                resetControlsTimeout();
-              }}
-              className="flex items-center gap-2 px-4 py-2 md:px-5 md:py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sans text-xs md:text-sm font-semibold rounded-full transition-all hover:scale-105 active:scale-95 cursor-pointer border border-slate-700 shadow-lg"
-            >
-              🔄 Mode: {connectionMode === "auto" ? `Auto (${useProxy ? "Proxy" : "Direct"})` : connectionMode === "proxy" ? "Proxy" : "Direct"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!channel && (
-        <div className="absolute inset-0 bg-black flex flex-col items-center justify-center text-center p-6 gap-4 z-10">
-          <div className="p-5 bg-zinc-950 border border-zinc-900 rounded-full text-[#E50914] animate-pulse">
-            <Tv className="w-16 h-16" />
-          </div>
-          <h2 className="font-sans font-bold text-2xl text-slate-100">
-            Welcome to IreenTV PRO
-          </h2>
-          <p className="font-sans text-slate-400 text-sm max-w-sm">
-            Select your favorite live channel from the highlights list below to enjoy high-quality streaming instantly.
-          </p>
-        </div>
-      )}
-
-      {/* Custom Control Bar & Overlays */}
-      <AnimatePresence>
-        {channel && showControls && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-slate-950/40 flex flex-col justify-between p-4 z-30 pointer-events-none"
-          >
-            {/* Top Indicator info */}
-            <div className="flex justify-between items-center w-full pointer-events-auto px-1">
-              <div className="flex items-center gap-1.5 sm:gap-3">
-                <span className="flex h-2 w-2 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                </span>
-                <span className="text-[10px] sm:text-xs font-sans tracking-wide text-red-500 uppercase font-bold">
+            <div>
+              <h2 className="text-base font-semibold text-zinc-100 flex flex-wrap items-center gap-2">
+                {channel.name}
+                <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
                   LIVE
                 </span>
-                <span className="text-xs sm:text-sm font-sans tracking-tight text-white font-medium truncate max-w-[120px] xs:max-w-[180px] sm:max-w-xs">
-                  | {channel.name}
+                <span className="px-2 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5" />
+                  লো-নেট ও অটো এইচডি
+                </span>
+                {streamMode === 'direct' ? (
+                  <span className="px-2 py-0.5 text-[10px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full flex items-center gap-1.5 transition-all duration-350">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0"></span>
+                    ডাইরেক্ট মোড (Direct Play)
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 text-[10px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-full flex items-center gap-1.5 transition-all duration-350 shadow-sm shadow-indigo-950/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping absolute shrink-0"></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"></span>
+                    প্রক্সি মোড (Secure Proxy Play)
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Category: {channel.category || 'Others'}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Aspect Ratio selector */}
+            <div className="flex items-center bg-zinc-800/60 p-0.5 rounded-lg border border-zinc-700/50">
+              <button 
+                onClick={() => setAspectRatio('16:9')}
+                className={`px-2 py-1 text-[10px] font-semibold rounded-md transition-colors ${aspectRatio === '16:9' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+                title="16:9 Aspect Ratio"
+              >
+                16:9
+              </button>
+              <button 
+                onClick={() => setAspectRatio('4:3')}
+                className={`px-2 py-1 text-[10px] font-semibold rounded-md transition-colors ${aspectRatio === '4:3' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+                title="4:3 Aspect Ratio"
+              >
+                4:3
+              </button>
+              <button 
+                onClick={() => setAspectRatio('fit')}
+                className={`px-2 py-1 text-[10px] font-semibold rounded-md transition-colors ${aspectRatio === 'fit' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+                title="Stretch to Fit"
+              >
+                FIT
+              </button>
+            </div>
+
+            <button 
+              onClick={handleReload}
+              className="p-2 rounded-lg bg-zinc-800/60 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-700/50 border border-zinc-700/50 transition-colors"
+              title="Reload Stream"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main player box */}
+      <div 
+        ref={containerRef}
+        onMouseMove={triggerShowControls}
+        onMouseLeave={() => isPlaying && setShowControls(false)}
+        className={`relative bg-black rounded-2xl overflow-hidden border border-zinc-800/80 group transition-all duration-300 shadow-2xl shadow-emerald-950/10 ${
+          isTheater && !isFullscreen ? 'aspect-video lg:aspect-[21/9] w-full' : 'aspect-video w-full'
+        }`}
+      >
+        {channel ? (
+          <>
+            {/* Top Overlay Header inside video player container */}
+            <div className={`absolute top-0 inset-x-0 bg-gradient-to-b from-black/95 via-black/40 to-transparent p-4 flex items-center justify-between transition-opacity duration-300 select-none z-10 ${
+              showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}>
+              {/* Left side: Live indicator and Channel Name */}
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 bg-red-600/30 text-red-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-red-500/40 shadow-sm">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                  LIVE
+                </span>
+                <span className="text-zinc-500 text-xs font-semibold">|</span>
+                <span className="text-white text-xs font-bold font-display tracking-wide drop-shadow-md">
+                  {channel.name}
                 </span>
               </div>
 
-              {/* Status Indicator & Close Button */}
+              {/* Right side: Auto indicator & Close button */}
               <div className="flex items-center gap-2">
-                <div className="text-[9px] font-sans font-medium text-zinc-400 bg-zinc-950/80 backdrop-blur-sm px-2 py-0.5 rounded border border-zinc-900/80">
-                  {connectionMode === "auto" ? `Auto (${useProxy ? "Proxy" : "Direct"})` : useProxy ? "Proxy" : "Direct"}
-                </div>
+                {streamMode === 'direct' ? (
+                  <span className="bg-zinc-950/80 border border-zinc-800 text-cyan-400 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0"></span>
+                    Auto (Direct)
+                  </span>
+                ) : (
+                  <span className="bg-zinc-950/80 border border-zinc-800 text-indigo-400 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-md relative overflow-hidden">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping absolute shrink-0"></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 relative z-10"></span>
+                    Auto (Proxy)
+                  </span>
+                )}
                 {onClose && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      // Exit full screen before calling onClose callback
-                      if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
-                        if (document.exitFullscreen) {
-                          document.exitFullscreen().catch(() => {});
-                        } else if ((document as any).webkitExitFullscreen) {
-                          try {
-                            (document as any).webkitExitFullscreen();
-                          } catch (err) {}
-                        }
-                      }
                       onClose();
                     }}
-                    className="p-1 sm:p-1.5 rounded-lg bg-[#E50914] text-white hover:bg-red-700 flex items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-md shadow-red-900/20"
-                    title="Close Player এবং ফিরে যান"
+                    className="p-1.5 bg-red-600 hover:bg-red-500 active:scale-95 text-white rounded-lg border border-red-700/30 transition-all shadow-md flex items-center justify-center cursor-pointer z-20"
+                    title="Close Player"
                   >
-                    <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Middle Action Ring for Play/Pause visual click */}
-            <div className="flex items-center justify-center self-center pointer-events-auto">
-              <button 
-                onClick={togglePlay} 
-                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-red-600/10 hover:bg-[#E50914]/20 text-[#E50914] border border-[#E50914]/30 flex items-center justify-center transition-all hover:scale-110 active:scale-95 duration-200 cursor-pointer"
+            <video
+              ref={videoRef}
+              className={`w-full h-full bg-black ${getAspectRatioClass()}`}
+              playsInline
+              onClick={togglePlay}
+            />
+
+            {/* Click to play/pause huge center button when controls visible */}
+            {showControls && (
+              <div 
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/40 flex items-center justify-center cursor-pointer transition-opacity duration-300"
+                onClick={togglePlay}
               >
-                {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-1" />}
-              </button>
-            </div>
+                <button className="p-4 rounded-full bg-emerald-500 text-zinc-950 hover:scale-110 active:scale-95 transition-all duration-200 shadow-lg shadow-emerald-500/20">
+                  {isPlaying ? <Pause className="w-6 h-6 fill-zinc-950" /> : <Play className="w-6 h-6 fill-zinc-950 ml-0.5" />}
+                </button>
+              </div>
+            )}
 
-            {/* Bottom Controls Panel */}
-            <div className="flex flex-col gap-2 w-full pointer-events-auto">
-              <div className="flex items-center justify-between bg-zinc-950/95 backdrop-blur-md border border-zinc-900 rounded-xl px-2 py-1.5 sm:px-4 sm:py-2 gap-2">
-                <div className="flex items-center gap-1.5 sm:gap-4">
-                  {/* Play Button */}
-                  <button
+            {/* Buffering Indicator */}
+            {isBuffering && !error && (
+              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                <div className="relative flex items-center justify-center">
+                  <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+                  <Sparkles className="w-4 h-4 text-emerald-400 absolute animate-pulse" />
+                </div>
+                <p className="text-sm font-medium text-emerald-400 animate-pulse tracking-wide">Loading stream...</p>
+              </div>
+            )}
+
+            {/* Error Message Panel */}
+            {error && (
+              <div className="absolute inset-0 bg-zinc-950/90 flex flex-col items-center justify-center gap-4 text-center px-6">
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-full text-red-500 animate-bounce">
+                  <AlertTriangle className="w-8 h-8" />
+                </div>
+                <div className="max-w-md">
+                  <h3 className="text-base font-semibold text-zinc-100 mb-1">Playback Error</h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">{error}</p>
+                </div>
+                <button
+                  onClick={handleReload}
+                  className="mt-2 px-4 py-2 bg-red-600 text-white rounded-xl font-semibold text-xs flex items-center gap-2 hover:bg-red-500 transition-all shadow-lg shadow-red-500/15 active:scale-95 animate-pulse"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {/* Dynamic Controls Bar */}
+            <div className={`absolute bottom-0 inset-x-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent p-4 flex flex-col gap-3 transition-opacity duration-300 select-none ${
+              showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}>
+              
+              {/* Controls buttons row */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {/* Play/Pause */}
+                  <button 
                     onClick={togglePlay}
-                    className="p-1 sm:p-1.5 rounded-lg text-zinc-350 hover:text-[#E50914] hover:bg-zinc-900 transition-colors cursor-pointer"
+                    className="p-2 text-zinc-200 hover:text-red-500 rounded-lg hover:bg-zinc-800/50 transition-all active:scale-90"
                   >
-                    {isPlaying ? <Pause className="w-4.5 h-4.5 sm:w-5 h-5" /> : <Play className="w-4.5 h-4.5 sm:w-5 h-5" />}
+                    {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
                   </button>
 
-                  {/* Refresh Button */}
-                  <button
-                    onClick={handleRefresh}
-                    title="Reload Stream"
-                    className="p-1 sm:p-1.5 rounded-lg text-zinc-350 hover:text-[#E50914] hover:bg-zinc-900 transition-colors cursor-pointer"
-                  >
-                    <RotateCcw className="w-4.5 h-4.5 sm:w-5 h-5" />
-                  </button>
-
-                  {/* Volume Control */}
-                  <div className="flex items-center gap-1 sm:gap-2 group/volume">
-                    <button
+                  {/* Volume control block */}
+                  <div className="flex items-center gap-2 group/volume">
+                    <button 
                       onClick={toggleMute}
-                      className="p-1 sm:p-1.5 rounded-lg text-zinc-350 hover:text-[#E50914] hover:bg-zinc-900 transition-colors cursor-pointer"
+                      className="p-2 text-zinc-200 hover:text-red-500 rounded-lg hover:bg-zinc-800/50 transition-all"
                     >
-                      {isMuted ? <VolumeX className="w-4.5 h-4.5 sm:w-5 h-5 text-rose-500" /> : <Volume2 className="w-4.5 h-4.5 sm:w-5 h-5" />}
+                      {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                     </button>
-                    <input
+                    <input 
                       type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
+                      min="0"
+                      max="1"
+                      step="0.05"
                       value={isMuted ? 0 : volume}
-                      onChange={(e) => updateVolume(parseFloat(e.target.value))}
-                      className="hidden sm:block w-16 md:w-20 accent-[#E50914] h-1 bg-zinc-800 rounded-lg cursor-pointer transition-all focus:outline-none"
+                      onChange={handleVolumeChange}
+                      className="w-20 accent-red-600 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                     />
                   </div>
                 </div>
 
-                {/* Right controls */}
-                <div className="flex items-center gap-1.5 sm:gap-3">
-                  {/* Quality Settings Selection */}
-                  {levels.length > 0 && (
-                    <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowQualityMenu(!showQualityMenu);
-                          resetControlsTimeout();
-                        }}
-                        className={`p-1 sm:p-1.5 rounded-lg text-zinc-350 hover:text-[#E50914] hover:bg-zinc-900 transition-colors flex items-center gap-1 cursor-pointer text-[10px] sm:text-xs font-sans ${
-                          currentLevelIndex !== -1 ? "text-[#E50914] font-semibold" : ""
-                        }`}
-                        title="Change Video Resolution"
-                      >
-                        <Settings className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${showQualityMenu ? "animate-spin" : ""}`} />
-                        <span>
-                          {currentLevelIndex === -1 
-                            ? `Auto` 
-                            : `${levels.find(l => l.index === currentLevelIndex)?.height || "Auto"}p`
-                          }
-                        </span>
-                      </button>
+                {/* Right side controls */}
+                <div className="flex items-center gap-2">
+                  {/* Manual Play Mode Selector */}
+                  <div className="flex items-center bg-zinc-900/90 border border-zinc-800 p-0.5 rounded-lg mr-1" title="Stream Mode Control">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlayMode('auto');
+                      }}
+                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
+                        playMode === 'auto'
+                          ? 'bg-red-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Auto
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlayMode('direct');
+                      }}
+                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
+                        playMode === 'direct'
+                          ? 'bg-red-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Direct
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlayMode('proxy');
+                      }}
+                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
+                        playMode === 'proxy'
+                          ? 'bg-red-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Proxy
+                    </button>
+                  </div>
 
-                      <AnimatePresence>
-                        {showQualityMenu && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="absolute bottom-12 right-0 bg-zinc-950/95 backdrop-blur-md border border-zinc-900 rounded-xl shadow-2xl p-2 min-w-[124px] flex flex-col gap-1 z-40 font-sans pointer-events-auto"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="px-2.5 py-1 text-slate-400 text-[10px] uppercase tracking-wider font-semibold border-b border-zinc-900 mb-1">
-                              Quality
-                            </div>
-                            
-                            {/* Auto level option */}
-                            <button
-                              onClick={() => handleQualityChange(-1)}
-                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                                currentLevelIndex === -1
-                                  ? "bg-[#E50914]/20 text-[#E50914]"
-                                  : "text-zinc-300 hover:bg-zinc-900"
-                              }`}
-                            >
-                              <span>Auto</span>
-                              {currentLevelIndex === -1 && <CheckCircle className="w-3.5 h-3.5 text-[#E50914]" />}
-                            </button>
+                  {/* Aspect ratio display */}
+                  <div className="text-[10px] text-zinc-400 bg-zinc-800/80 border border-zinc-700/50 px-2 py-1 rounded font-mono">
+                    {aspectRatio.toUpperCase()}
+                  </div>
 
-                            {/* Specific heights option */}
-                            {levels.map((lvl) => (
-                              <button
-                                key={lvl.index}
-                                onClick={() => handleQualityChange(lvl.index)}
-                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                                  currentLevelIndex === lvl.index
-                                    ? "bg-[#E50914]/20 text-[#E50914]"
-                                    : "text-zinc-300 hover:bg-zinc-900"
-                                }`}
-                              >
-                                <span>{lvl.height}p</span>
-                                {currentLevelIndex === lvl.index && <CheckCircle className="w-3.5 h-3.5 text-[#E50914]" />}
-                              </button>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                  {/* Theater Mode */}
+                  {!isFullscreen && (
+                    <button 
+                      onClick={() => setIsTheater(!isTheater)}
+                      className={`p-2 rounded-lg hover:bg-zinc-800/50 transition-all ${isTheater ? 'text-red-500' : 'text-zinc-200 hover:text-red-500'}`}
+                      title={isTheater ? "Normal Mode" : "Theater Mode"}
+                    >
+                      <Monitor className="w-5 h-5" />
+                    </button>
                   )}
 
-                  {/* Server Selection Toggle */}
-                  {(channel.link2 || channel.link3) && (
-                    <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
-                      <button
-                        onClick={() => {
-                          setSelectedServer(1);
-                          resetControlsTimeout();
-                        }}
-                        className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                          selectedServer === 1
-                            ? "bg-[#E50914] text-white font-bold"
-                            : "text-zinc-400 hover:text-white"
-                        }`}
-                        title="Switch to Server 1"
-                      >
-                        Sv 1
-                      </button>
-                      {channel.link2 && (
-                        <button
-                          onClick={() => {
-                            setSelectedServer(2);
-                            resetControlsTimeout();
-                          }}
-                          className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                            selectedServer === 2
-                              ? "bg-[#E50914] text-white font-bold"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                          title="Switch to Server 2"
-                        >
-                          Sv 2
-                        </button>
-                      )}
-                      {channel.link3 && (
-                        <button
-                          onClick={() => {
-                            setSelectedServer(3);
-                            resetControlsTimeout();
-                          }}
-                          className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                            selectedServer === 3
-                              ? "bg-[#E50914] text-white font-bold"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                          title="Switch to Server 3"
-                        >
-                          Sv 3
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Connection Mode Toggle */}
-                  <button
-                    onClick={() => {
-                      cycleConnectionMode();
-                      resetControlsTimeout();
-                    }}
-                    className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-sans font-semibold flex items-center gap-1 border transition-all cursor-pointer ${
-                      connectionMode === "auto"
-                        ? "bg-indigo-600/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-550/20"
-                        : connectionMode === "proxy"
-                        ? "bg-amber-600/10 border-amber-500/30 text-amber-400 hover:bg-amber-550/20"
-                        : "bg-emerald-600/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-550/20"
-                    }`}
-                    title="Toggle Connection"
-                  >
-                    <span>{connectionMode === "auto" ? "Auto" : connectionMode === "proxy" ? "Proxy" : "Direct"}</span>
-                  </button>
-
-                  {/* Fullscreen Button */}
-                  <button
+                  {/* Fullscreen toggle */}
+                  <button 
                     onClick={toggleFullscreen}
-                    className="p-1.5 rounded-lg text-zinc-350 hover:text-[#E50914] hover:bg-zinc-900 transition-colors cursor-pointer"
+                    className="p-2 text-zinc-200 hover:text-red-500 rounded-lg hover:bg-zinc-800/50 transition-all"
+                    title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                   >
-                    {isFullscreen ? <Minimize className="w-4.5 h-4.5 sm:w-5 h-5" /> : <Maximize className="w-4.5 h-4.5 sm:w-5 h-5 animate-pulse" />}
+                    <Minimize2 className="w-5 h-5" />
                   </button>
                 </div>
               </div>
             </div>
-          </motion.div>
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center text-center px-6">
+            <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl text-red-500 animate-pulse mb-3">
+              <Tv className="w-12 h-12" />
+            </div>
+            <h3 className="text-lg font-bold text-zinc-100">Live TV Streaming</h3>
+            <p className="text-sm text-zinc-400 mt-1 max-w-sm">
+              Select any channel from the list to start watching live stream.
+            </p>
+          </div>
         )}
-      </AnimatePresence>
+      </div>
     </div>
   );
 }
