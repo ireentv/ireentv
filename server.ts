@@ -625,30 +625,28 @@ app.get("/api/hls/stream.m3u8", async (req, res) => {
 
   // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard streams
   if (referer.includes("executeandship.com") || referer === "null") {
-    try {
-      const uObj = new URL(targetUrl);
-      referer = uObj.origin + "/";
-    } catch (e) {}
+    referer = "";
   }
   if (origin.includes("executeandship.com") || origin === "null") {
-    try {
-      const uObj = new URL(targetUrl);
-      origin = uObj.origin;
-    } catch (e) {}
+    origin = "";
   }
 
   try {
     const bdIp = "103.108.140.1";
     const headers: Record<string, string> = {
       "User-Agent": uaVal || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Origin": origin,
-      "Referer": referer,
       "X-Forwarded-For": bdIp,
       "X-Real-IP": bdIp,
       "Client-IP": bdIp,
       "CF-Connecting-IP": bdIp,
       "True-Client-IP": bdIp,
     };
+    if (origin) {
+      headers["Origin"] = origin;
+    }
+    if (referer) {
+      headers["Referer"] = referer;
+    }
     if (cookieVal) {
       headers["Cookie"] = cookieVal;
     }
@@ -695,7 +693,7 @@ app.get("/api/hls/stream.m3u8", async (req, res) => {
             }
           }
           const isPlaylist = absoluteUri.includes(".m3u8");
-          const proxiedUri = `${isPlaylist ? "/api/hls/stream.m3u8" : "/api/hls/chunk.ts"}?url=${encodeURIComponent(absoluteUri)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${suffix}`;
+          const proxiedUri = `${isPlaylist ? "/api/hls/stream.m3u8" : "/api/hls/chunk.ts"}?url=${encodeURIComponent(absoluteUri)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
           modifiedLine = line.replace(rawUri, proxiedUri);
         }
         return modifiedLine;
@@ -722,9 +720,9 @@ app.get("/api/hls/stream.m3u8", async (req, res) => {
 
       // Rewrite sub-playlists or segments
       if (absoluteUrl.includes(".m3u8")) {
-        return `/api/hls/stream.m3u8?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${suffix}`;
+        return `/api/hls/stream.m3u8?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
       } else {
-        return `/api/hls/chunk.ts?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${suffix}`;
+        return `/api/hls/chunk.ts?url=${encodeURIComponent(absoluteUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}${origin ? `&origin=${encodeURIComponent(origin)}` : ""}${suffix}`;
       }
     });
 
@@ -757,16 +755,10 @@ app.get("/api/hls/chunk.ts", async (req, res) => {
 
   // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard chunks
   if (referer.includes("executeandship.com") || referer === "null") {
-    try {
-      const uObj = new URL(targetUrl);
-      referer = uObj.origin + "/";
-    } catch (e) {}
+    referer = "";
   }
   if (origin.includes("executeandship.com") || origin === "null") {
-    try {
-      const uObj = new URL(targetUrl);
-      origin = uObj.origin;
-    } catch (e) {}
+    origin = "";
   }
 
   // Serve from cache instantly if hit
@@ -783,8 +775,6 @@ app.get("/api/hls/chunk.ts", async (req, res) => {
     const bdIp = "103.108.140.1";
     const headers: Record<string, string> = {
       "User-Agent": uaVal || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Origin": origin,
-      "Referer": referer,
       "Connection": "keep-alive",
       "X-Forwarded-For": bdIp,
       "X-Real-IP": bdIp,
@@ -792,6 +782,12 @@ app.get("/api/hls/chunk.ts", async (req, res) => {
       "CF-Connecting-IP": bdIp,
       "True-Client-IP": bdIp,
     };
+    if (origin) {
+      headers["Origin"] = origin;
+    }
+    if (referer) {
+      headers["Referer"] = referer;
+    }
     if (cookieVal) {
       headers["Cookie"] = cookieVal;
     }

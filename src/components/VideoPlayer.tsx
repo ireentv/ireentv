@@ -66,7 +66,18 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
 
   // Synchronize useProxy whenever connectionMode, channel, selectedServer, or isStaticMode changes
   useEffect(() => {
-    if (connectionMode === "proxy") {
+    const activeLink = 
+      selectedServer === 3 && channel?.link3 
+        ? channel.link3 
+        : selectedServer === 2 && channel?.link2 
+        ? channel.link2 
+        : channel?.link;
+
+    const isHttp = activeLink?.startsWith("http://");
+
+    if (isHttp) {
+      setUseProxy(true);
+    } else if (connectionMode === "proxy") {
       setUseProxy(true);
     } else if (connectionMode === "direct") {
       setUseProxy(false);
