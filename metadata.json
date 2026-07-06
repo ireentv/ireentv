@@ -1,6 +1,6 @@
 {
-  "name": "IREENTV",
-  "description": "একটি আধুনিক টিভি ওয়েবসাইট যেখানে লাইভ ভিডিও স্ট্রিম, সার্চ অপশন, ডার্ক মোড এবং পছন্দের তালিকা সংরক্ষণ করার সুবিধা রয়েছে।",
+  "name": "IreenTV",
+  "description": "Live TV & Sports Streaming App, optimized for Smart TVs and web browsing.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

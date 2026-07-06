@@ -1,7 +1,7 @@
 {
-  "name": "IreenTV Live & Sports",
+  "name": "IreenTV - Live TV and Sports",
   "short_name": "IreenTV",
-  "description": "Premium Live TV and Sports Streaming Portal",
+  "description": "Watch live TV, sports, and entertainment channels on IreenTV.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
@@ -9,16 +9,14 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/icon-192.jpg",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/jpeg"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/icon-512.jpg",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/jpeg"
     }
   ]
 }
