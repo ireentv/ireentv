@@ -555,6 +555,9 @@ export async function onRequest(context: { request: Request; env: any; params: a
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
         },
       });
     } catch (err: any) {
@@ -571,14 +574,28 @@ export async function onRequest(context: { request: Request; env: any; params: a
   // Route 2: PROXY m3u8 stream playlists (/api/hls/stream.m3u8)
   if (pathname === "/api/hls/stream.m3u8") {
     const targetUrl = url.searchParams.get("url");
-    const referer = url.searchParams.get("referer") || "https://executeandship.com/";
-    const origin = url.searchParams.get("origin") || "https://executeandship.com";
+    let referer = url.searchParams.get("referer") || "https://executeandship.com/";
+    let origin = url.searchParams.get("origin") || "https://executeandship.com";
     const cookieVal = url.searchParams.get("cookie") || "";
     const uaVal = url.searchParams.get("ua") || "";
     const hostVal = url.searchParams.get("host") || "";
 
     if (!targetUrl) {
       return new Response("Missing target m3u8 URL", { status: 400 });
+    }
+
+    // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard streams
+    if (referer.includes("executeandship.com") || referer === "null") {
+      try {
+        const uObj = new URL(targetUrl);
+        referer = uObj.origin + "/";
+      } catch (e) {}
+    }
+    if (origin.includes("executeandship.com") || origin === "null") {
+      try {
+        const uObj = new URL(targetUrl);
+        origin = uObj.origin;
+      } catch (e) {}
     }
 
     try {
@@ -683,14 +700,28 @@ export async function onRequest(context: { request: Request; env: any; params: a
   // Route 3: PROXY segment chunks (/api/hls/chunk.ts)
   if (pathname === "/api/hls/chunk.ts") {
     const targetUrl = url.searchParams.get("url");
-    const referer = url.searchParams.get("referer") || "https://executeandship.com/";
-    const origin = url.searchParams.get("origin") || "https://executeandship.com";
+    let referer = url.searchParams.get("referer") || "https://executeandship.com/";
+    let origin = url.searchParams.get("origin") || "https://executeandship.com";
     const cookieVal = url.searchParams.get("cookie") || "";
     const uaVal = url.searchParams.get("ua") || "";
     const hostVal = url.searchParams.get("host") || "";
 
     if (!targetUrl) {
       return new Response("Missing target chunk URL", { status: 400 });
+    }
+
+    // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard chunks
+    if (referer.includes("executeandship.com") || referer === "null") {
+      try {
+        const uObj = new URL(targetUrl);
+        referer = uObj.origin + "/";
+      } catch (e) {}
+    }
+    if (origin.includes("executeandship.com") || origin === "null") {
+      try {
+        const uObj = new URL(targetUrl);
+        origin = uObj.origin;
+      } catch (e) {}
     }
 
     try {

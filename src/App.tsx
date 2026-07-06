@@ -380,7 +380,7 @@ export default function App() {
     try {
       let data: any[] = [];
       try {
-        const response = await fetch("/api/channels");
+        const response = await fetch(`/api/channels?t=${Date.now()}`);
         if (response.ok) {
           data = await response.json();
           setIsStaticMode(false);

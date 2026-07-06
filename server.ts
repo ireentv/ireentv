@@ -549,6 +549,9 @@ app.get("/api/channels", async (req, res) => {
 
     combinedChannels = [...combinedChannels, ...unmatchedToffeeChannels];
 
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.json(combinedChannels);
   } catch (error: any) {
     console.error("Error loading channels:", error);
@@ -610,14 +613,28 @@ function getFullTargetUrl(req: any): string {
 
 app.get("/api/hls/stream.m3u8", async (req, res) => {
   const targetUrl = getFullTargetUrl(req);
-  const referer = (req.query.referer as string) || "https://executeandship.com/";
-  const origin = (req.query.origin as string) || "https://executeandship.com";
+  let referer = (req.query.referer as string) || "https://executeandship.com/";
+  let origin = (req.query.origin as string) || "https://executeandship.com";
   const cookieVal = (req.query.cookie as string) || "";
   const uaVal = (req.query.ua as string) || "";
   const hostVal = (req.query.host as string) || "";
 
   if (!targetUrl) {
     return res.status(400).send("Missing target m3u8 URL");
+  }
+
+  // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard streams
+  if (referer.includes("executeandship.com") || referer === "null") {
+    try {
+      const uObj = new URL(targetUrl);
+      referer = uObj.origin + "/";
+    } catch (e) {}
+  }
+  if (origin.includes("executeandship.com") || origin === "null") {
+    try {
+      const uObj = new URL(targetUrl);
+      origin = uObj.origin;
+    } catch (e) {}
   }
 
   try {
@@ -728,14 +745,28 @@ const MAX_CACHE_SIZE = 120;
 // Proxy for .ts video segments and other binary static pieces
 app.get("/api/hls/chunk.ts", async (req, res) => {
   const targetUrl = getFullTargetUrl(req);
-  const referer = (req.query.referer as string) || "https://executeandship.com/";
-  const origin = (req.query.origin as string) || "https://executeandship.com";
+  let referer = (req.query.referer as string) || "https://executeandship.com/";
+  let origin = (req.query.origin as string) || "https://executeandship.com";
   const cookieVal = (req.query.cookie as string) || "";
   const uaVal = (req.query.ua as string) || "";
   const hostVal = (req.query.host as string) || "";
 
   if (!targetUrl) {
     return res.status(400).send("Missing target chunk URL");
+  }
+
+  // Dynamic origin/referer resolution to prevent CDN 403 Forbidden blocks on standard chunks
+  if (referer.includes("executeandship.com") || referer === "null") {
+    try {
+      const uObj = new URL(targetUrl);
+      referer = uObj.origin + "/";
+    } catch (e) {}
+  }
+  if (origin.includes("executeandship.com") || origin === "null") {
+    try {
+      const uObj = new URL(targetUrl);
+      origin = uObj.origin;
+    } catch (e) {}
   }
 
   // Serve from cache instantly if hit
