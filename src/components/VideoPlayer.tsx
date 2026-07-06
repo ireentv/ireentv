@@ -567,9 +567,12 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
   }, [channel, retryCount, useProxy, hasAutoFlipped, selectedServer, connectionMode, tryNextServer]);
 
   useEffect(() => {
-    initPlayer();
+    const cleanup = initPlayer();
     // Auto-show controls when changing channel
     setShowControls(true);
+    return () => {
+      if (cleanup) cleanup();
+    };
   }, [channel, retryCount, useProxy, selectedServer, initPlayer, connectionMode]);
 
   // Video controller handlers
