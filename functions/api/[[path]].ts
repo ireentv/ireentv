@@ -607,14 +607,9 @@ export async function onRequest(context: { request: Request; env: any; params: a
         "X-Forwarded-For": bdIp,
         "X-Real-IP": bdIp,
         "Client-IP": bdIp,
-        "CF-Connecting-IP": bdIp,
-        "True-Client-IP": bdIp,
       };
       if (cookieVal) {
         headers["Cookie"] = cookieVal;
-      }
-      if (hostVal) {
-        headers["Host"] = hostVal;
       }
 
       const hlsRes = await fetch(targetUrl, { headers });
@@ -730,18 +725,12 @@ export async function onRequest(context: { request: Request; env: any; params: a
         "User-Agent": uaVal || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Origin": origin,
         "Referer": referer,
-        "Connection": "keep-alive",
         "X-Forwarded-For": bdIp,
         "X-Real-IP": bdIp,
         "Client-IP": bdIp,
-        "CF-Connecting-IP": bdIp,
-        "True-Client-IP": bdIp,
       };
       if (cookieVal) {
         headers["Cookie"] = cookieVal;
-      }
-      if (hostVal) {
-        headers["Host"] = hostVal;
       }
 
       const chunkRes = await fetch(targetUrl, { headers });
