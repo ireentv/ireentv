@@ -64,31 +64,39 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
     }
 
     const streamUrl = activeUrl || channel.url;
-    const directUrl = streamUrl;
-    const proxiedUrl = `/api/stream-proxy?url=${encodeURIComponent(streamUrl)}`;
     
+    // Build a list of stream sources to try sequentially in the background
+    const streamSources: string[] = [];
+
     // Auto-detect if we must use the proxy because of HTTP under HTTPS
     const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const isHttpUrl = streamUrl.startsWith('http://');
     const mustUseProxy = isHttps && isHttpUrl;
 
-    // Determine player URL and initial mode based on playMode
-    let initialMode: 'direct' | 'proxy' = 'direct';
-
-    if (playMode === 'proxy' || (playMode === 'auto' && mustUseProxy)) {
-      initialMode = 'proxy';
-    } else if (playMode === 'direct') {
-      initialMode = 'direct';
-    } else {
-      // playMode === 'auto'
-      initialMode = 'direct';
+    if (!mustUseProxy) {
+      // 1. Direct stream URL (First try if not blocked by HTTPS mixed content rules)
+      streamSources.push(streamUrl);
     }
 
-    let currentMode: 'direct' | 'proxy' = initialMode;
-    const attemptedModes = new Set<string>([currentMode]);
-    setStreamMode(currentMode);
+    // 2. Primary local proxy (routes through our /api/stream-proxy)
+    streamSources.push(`/api/stream-proxy?url=${encodeURIComponent(streamUrl)}`);
 
-    let playerUrl = currentMode === 'proxy' ? proxiedUrl : directUrl;
+    // 3. Custom Proxy Server 1: corsproxy.io (high-performance public CORS/IPTV streaming proxy)
+    streamSources.push(`https://corsproxy.io/?${encodeURIComponent(streamUrl)}`);
+
+    // 4. Custom Proxy Server 2: allorigins.win raw proxy
+    streamSources.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(streamUrl)}`);
+
+    // 5. Desperate fallback: try the direct URL at the end even if mustUseProxy is true
+    if (mustUseProxy) {
+      streamSources.push(streamUrl);
+    }
+
+    let currentSourceIdx = 0;
+    const initialUrl = streamSources[currentSourceIdx];
+    
+    // Determine initial visual stream mode indicator ('direct' or 'proxy')
+    setStreamMode(initialUrl === streamUrl ? 'direct' : 'proxy');
 
     let networkErrorRetryCount = 0;
     let otherErrorRetryCount = 0;
@@ -101,32 +109,29 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
       }
     };
 
-    // Robust bidirectional dual-fallback mode switching
-    const tryFallbackMode = (hlsInstance?: Hls) => {
-      const alternativeMode = currentMode === 'direct' ? 'proxy' : 'direct';
-      if (!attemptedModes.has(alternativeMode)) {
-        console.log(`Playback failed or timed out in ${currentMode} mode. Attempting fallback to ${alternativeMode} mode...`);
-        currentMode = alternativeMode;
-        attemptedModes.add(alternativeMode);
-        setStreamMode(alternativeMode);
+    // Try next available automatic proxy server / source
+    const tryFallbackSource = (hlsInstance?: Hls): boolean => {
+      if (currentSourceIdx + 1 < streamSources.length) {
+        currentSourceIdx++;
+        const targetUrl = streamSources[currentSourceIdx];
+        console.log(`Playback failed/timed out on source ${currentSourceIdx}. Trying next custom backup proxy: ${targetUrl.substring(0, 60)}...`);
         
-        const targetSource = alternativeMode === 'proxy' ? proxiedUrl : directUrl;
-        
+        setStreamMode(targetUrl === streamUrl ? 'direct' : 'proxy');
         clearRecoveryTimeout();
         networkErrorRetryCount = 0;
-        
+
         if (hlsInstance) {
-          hlsInstance.loadSource(targetSource);
+          hlsInstance.loadSource(targetUrl);
           hlsInstance.startLoad();
           startFallbackTimeout(hlsInstance);
         } else {
-          video.src = targetSource;
+          video.src = targetUrl;
           video.load();
           startFallbackTimeout();
         }
-        return true; // Mode switched successfully
+        return true;
       }
-      return false; // Already tried both modes
+      return false;
     };
 
     // Smart recovery timeout: if stream does not play within 4.5 seconds, auto-fallback
@@ -134,8 +139,8 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
       clearRecoveryTimeout();
       fallbackTimeout = setTimeout(() => {
         if (!isPlaying) {
-          console.log(`Stream loading timed out in ${currentMode} mode. Triggering automatic fallback...`);
-          if (!tryFallbackMode(hlsInstance)) {
+          console.log(`Stream loading timed out on source index ${currentSourceIdx}. Trying next automatic backup proxy...`);
+          if (!tryFallbackSource(hlsInstance)) {
             setError('Playback timed out. The stream might be offline or blocked.');
             setIsBuffering(false);
           }
@@ -173,7 +178,7 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
     };
 
     const handleNativeError = () => {
-      if (!tryFallbackMode()) {
+      if (!tryFallbackSource()) {
         setError('Unable to play this channel. It may be offline or temporarily unavailable.');
         setIsBuffering(false);
       }
@@ -204,7 +209,7 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
       });
       hlsRef.current = hls;
 
-      hls.loadSource(playerUrl);
+      hls.loadSource(initialUrl);
       hls.attachMedia(video);
 
       startFallbackTimeout(hls);
@@ -230,8 +235,8 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
               console.log(`Fatal network error (retry ${networkErrorRetryCount}/3)...`);
               if (networkErrorRetryCount <= 2) {
                 hls.startLoad();
-              } else if (tryFallbackMode(hls)) {
-                // Dual-fallback active
+              } else if (tryFallbackSource(hls)) {
+                // Next backup proxy is active
               } else {
                 setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
                 setIsBuffering(false);
@@ -254,8 +259,8 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
               break;
               
             default:
-              if (tryFallbackMode(hls)) {
-                // Dual-fallback active
+              if (tryFallbackSource(hls)) {
+                // Next backup proxy is active
               } else {
                 setError('Unable to play this channel. The stream link might be offline or has blocked cross-origin playback.');
                 setIsBuffering(false);
@@ -268,7 +273,7 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
       });
     } else {
       // Fallback for native HLS (like Safari) or MP4 streams
-      video.src = playerUrl;
+      video.src = initialUrl;
       video.addEventListener('loadedmetadata', handleNativeLoadedMetadata);
       video.addEventListener('error', handleNativeError);
       startFallbackTimeout();
@@ -509,20 +514,8 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
                 </span>
               </div>
 
-              {/* Right side: Auto indicator & Close button */}
+              {/* Right side: Close button */}
               <div className="flex items-center gap-2">
-                {streamMode === 'direct' ? (
-                  <span className="bg-zinc-950/80 border border-zinc-800 text-cyan-400 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-md">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0"></span>
-                    Auto (Direct)
-                  </span>
-                ) : (
-                  <span className="bg-zinc-950/80 border border-zinc-800 text-indigo-400 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-md relative overflow-hidden">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping absolute shrink-0"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 relative z-10"></span>
-                    Auto (Proxy)
-                  </span>
-                )}
                 {onClose && (
                   <button
                     onClick={(e) => {
@@ -628,49 +621,6 @@ export default function VideoPlayer({ channel, activeUrl, onPrev, onNext, onClos
 
                 {/* Right side controls */}
                 <div className="flex items-center gap-2">
-                  {/* Manual Play Mode Selector */}
-                  <div className="flex items-center bg-zinc-900/90 border border-zinc-800 p-0.5 rounded-lg mr-1" title="Stream Mode Control">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlayMode('auto');
-                      }}
-                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
-                        playMode === 'auto'
-                          ? 'bg-red-600 text-white'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      Auto
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlayMode('direct');
-                      }}
-                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
-                        playMode === 'direct'
-                          ? 'bg-red-600 text-white'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      Direct
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlayMode('proxy');
-                      }}
-                      className={`px-2 py-1 text-[10px] font-bold rounded transition-colors duration-200 ${
-                        playMode === 'proxy'
-                          ? 'bg-red-600 text-white'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      Proxy
-                    </button>
-                  </div>
-
                   {/* Aspect ratio display */}
                   <div className="text-[10px] text-zinc-400 bg-zinc-800/80 border border-zinc-700/50 px-2 py-1 rounded font-mono">
                     {aspectRatio.toUpperCase()}
