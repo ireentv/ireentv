@@ -191,163 +191,144 @@ export async function onRequest(context: { request: Request; env: any; params: a
         console.error("Cloudflare: Error fetching RoarZone channels:", err);
       }
 
-      // Fetch Football HD Zone channels (Auto Update Live Sports Data)
+      // Fetch Live Sports HD channels (Auto Update Live Sports Data from M3U playlists)
       let footballHDChannels: any[] = [];
-      try {
-        const fbResponse = await fetch(
-          "https://raw.githubusercontent.com/sm-monirulislam/Upcoming-and-Live-Sports-Data/refs/heads/main/Sports_data.json"
-        );
-        if (fbResponse.ok) {
-          const fbData: any = await fbResponse.json();
-          let parsedMatches: any[] = [];
-          if (fbData && Array.isArray(fbData.matches)) {
-            parsedMatches = fbData.matches;
-          } else if (Array.isArray(fbData)) {
-            parsedMatches = fbData;
+      const m3uPlaylists = [
+        "https://raw.githubusercontent.com/sportlive18/Sonyliv-Playlist-Autoupdate/refs/heads/main/sonyliv.m3u",
+        "https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u"
+      ];
+
+      let channelIndex = 0;
+      for (const url of m3uPlaylists) {
+        try {
+          const fbResponse = await fetch(url);
+          if (fbResponse.ok) {
+            const text = await fbResponse.text();
+            const lines = text.split(/\r?\n/);
+            let currentItem: any = null;
+
+            const finalizeCurrentItem = () => {
+              if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
+                const urls = currentItem.urls;
+                currentItem.link = urls[0];
+                if (urls.length > 1) {
+                  currentItem.link2 = urls[1];
+                }
+                if (urls.length > 2) {
+                  currentItem.link3 = urls[2];
+                }
+
+                currentItem.id = currentItem.tvgId ? `football-m3u-${currentItem.tvgId}-${channelIndex}` : `football-m3u-${channelIndex}`;
+
+                if (!currentItem.logo) {
+                  currentItem.logo = "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=200&auto=format&fit=crop";
+                }
+
+                currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
+                currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
+                if (currentItem.optUa) {
+                  currentItem.ua = currentItem.optUa;
+                }
+
+                if (currentItem.link2) {
+                  currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
+                  currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
+                  if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
+                }
+
+                if (currentItem.link3) {
+                  currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
+                  currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
+                  if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
+                }
+
+                currentItem.status = "LIVE";
+                footballHDChannels.push(currentItem);
+                channelIndex++;
+              }
+              currentItem = null;
+            };
+
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              if (!line) continue;
+
+              if (line.startsWith("#EXTINF:")) {
+                finalizeCurrentItem();
+
+                currentItem = {
+                  isFootballHDZone: true,
+                  group: "Football",
+                  urls: [],
+                  optReferer: "",
+                  optOrigin: "",
+                  optUa: ""
+                };
+
+                // Extract tvg-logo
+                const logoMatch = line.match(/tvg-logo=["']([^"']+)["']/i);
+                if (logoMatch) {
+                  currentItem.logo = logoMatch[1];
+                }
+
+                // Extract group-title
+                const groupMatch = line.match(/group-title=["']([^"']+)["']/i);
+                if (groupMatch) {
+                  currentItem.group = groupMatch[1];
+                }
+
+                // Extract tvg-id
+                const idMatch = line.match(/tvg-id=["']([^"']+)["']/i);
+                if (idMatch) {
+                  currentItem.tvgId = idMatch[1];
+                }
+
+                // Get the display name (after the last comma)
+                const commaIndex = line.lastIndexOf(",");
+                if (commaIndex !== -1) {
+                  currentItem.name = line.substring(commaIndex + 1).trim();
+                } else {
+                  currentItem.name = `M3U Channel ${channelIndex + 1}`;
+                }
+              } else if (line.startsWith("#EXTVLCOPT:")) {
+                if (currentItem) {
+                  const opt = line.substring("#EXTVLCOPT:".length).trim();
+                  const eqIdx = opt.indexOf("=");
+                  if (eqIdx !== -1) {
+                    const key = opt.substring(0, eqIdx).toLowerCase().trim();
+                    const val = opt.substring(eqIdx + 1).trim();
+                    if (key === "http-client-referrer" || key === "http-referrer" || key === "referer") {
+                      currentItem.optReferer = val;
+                    } else if (key === "http-user-agent" || key === "user-agent") {
+                      currentItem.optUa = val;
+                    } else if (key === "http-origin" || key === "origin") {
+                      currentItem.optOrigin = val;
+                    }
+                  }
+                }
+              } else if (line.startsWith("#")) {
+                // Other comments end the previous channel
+                finalizeCurrentItem();
+              } else {
+                // This is the stream URL
+                if (currentItem) {
+                  currentItem.urls.push(line);
+                }
+              }
+            }
+            finalizeCurrentItem();
           }
-          
-          footballHDChannels = parsedMatches
-            .filter((item: any) => {
-              if (!item) return false;
-              const cat = String(item.Category || "").toLowerCase().trim();
-              const name = String(item.event_name || item.title || "").toLowerCase();
-              
-              // Explicitly match football/friendlies/soccer categories
-              if (cat === "football" || cat === "friendlies" || cat === "soccer" || cat === "friendly") {
-                return true;
-              }
-              
-              // If it's a completely different sport (like cricket, tennis, badminton, kabaddi), do not match
-              // UNLESS the name explicitly contains a major football keyword
-              if (cat === "cricket" || cat === "tennis" || cat === "badminton" || cat === "kabaddi" || cat === "basketball") {
-                const strongFootballTerms = ["football", "soccer", "fifa", "uefa", "laliga", "premier league", "serie a", "bundesliga", "ligue 1", "champions league", "copa america", "euro 2026", "euro 2024", "world cup qualifiers", "european qualifiers"];
-                return strongFootballTerms.some(kw => name.includes(kw));
-              }
-              
-              // Otherwise (category is empty, "sports", "live", "other", "undefined", or anything else), match against extensive football keywords:
-              const keywords = [
-                "football", "soccer", "fifa", "uefa", "laliga", "la liga", "premier league", 
-                "serie a", "serie-a", "bundesliga", "ligue 1", "ligue-1", "champions league", 
-                "europa league", "world cup", "copa america", "euro 2026", "euro 2024", 
-                "friendlies", "friendly", "club friendly", "qualifiers", "european qualifiers",
-                "italy", "saudi", "pro league", "spl", "fc ", " fc", "inter miami", "al hilal", 
-                "al nassr", "chelsea", "real madrid", "barcelona", "manchester", "man city", 
-                "liverpool", "bayern", "juventus", "milan", "arsenal", "atletico", "psg", 
-                "tottenham", "dortmund", "inter milan", "ac milan", "bengaluru fc", "mohun bagan"
-              ];
-              
-              return keywords.some(kw => name.includes(kw));
-            })
-            .map((item: any, index: number) => {
-              const streamsList = Array.isArray(item.streams) ? item.streams : [];
-              let mainLink = "";
-              let altLink = "";
-              let thirdLink = "";
-              
-              let referer1 = "";
-              let referer2 = "";
-              let referer3 = "";
-              
-              let origin1 = "";
-              let origin2 = "";
-              let origin3 = "";
-              
-              const itemReferer = item.referer || item.headers?.Referer || item.headers?.referer || "";
-              const itemOrigin = item.origin || item.headers?.Origin || item.headers?.origin || "https://bd-mc-fblive.fancode.com";
-              
-              if (streamsList.length > 0) {
-                const s1 = streamsList[0] || {};
-                mainLink = s1.stream_url || s1["stream_url 1"] || s1["stream_url 2"] || s1.url || s1.link || "";
-                referer1 = s1.stream_referer || s1.referer || s1.headers?.Referer || s1.headers?.referer || s1.stream_headers?.Referer || s1.stream_headers?.referer || itemReferer || "https://bd-mc-fblive.fancode.com/";
-                origin1 = s1.stream_origin || s1.origin || s1.headers?.Origin || s1.headers?.origin || s1.stream_headers?.Origin || s1.stream_headers?.origin || itemOrigin;
-                
-                if (streamsList.length > 1) {
-                  const s2 = streamsList[1] || {};
-                  altLink = s2.stream_url || s2["stream_url 1"] || s2["stream_url 2"] || s2.url || s2.link || "";
-                  referer2 = s2.stream_referer || s2.referer || s2.headers?.Referer || s2.headers?.referer || s2.stream_headers?.Referer || s2.stream_headers?.referer || itemReferer || referer1;
-                  origin2 = s2.stream_origin || s2.origin || s2.headers?.Origin || s2.headers?.origin || s2.stream_headers?.Origin || s2.stream_headers?.origin || s1.stream_origin || s1.origin || s1.headers?.Origin || s1.headers?.origin || itemOrigin;
-                }
-                
-                if (streamsList.length > 2) {
-                  const s3 = streamsList[2] || {};
-                  thirdLink = s3.stream_url || s3["stream_url 1"] || s3["stream_url 2"] || s3.url || s3.link || "";
-                  referer3 = s3.stream_referer || s3.referer || s3.headers?.Referer || s3.headers?.referer || s3.stream_headers?.Referer || s3.stream_headers?.referer || itemReferer || referer1;
-                  origin3 = s3.stream_origin || s3.origin || s3.headers?.Origin || s3.headers?.origin || s3.stream_headers?.Origin || s3.stream_headers?.origin || s1.stream_origin || s1.origin || s1.headers?.Origin || s1.headers?.origin || itemOrigin;
-                }
-              }
-              
-              const teamALogo = item.eventInfo?.teamAFlag || "";
-              const teamBLogo = item.eventInfo?.teamBFlag || "";
-              const logoUrl = teamALogo || teamBLogo || "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=200&auto=format&fit=crop";
-              const eventName = item.event_name || item.title || `Match ${index + 1}`;
-              const categoryName = item.Category || "Football";
-              
-              return {
-                id: String(item.id || `football-hd-zone-${index}`),
-                name: eventName,
-                logo: logoUrl,
-                link: mainLink,
-                link2: altLink,
-                link3: thirdLink,
-                referer: referer1,
-                referer2: referer2,
-                referer3: referer3,
-                origin: origin1,
-                origin2: origin2,
-                origin3: origin3,
-                isFootballHDZone: true,
-                group: categoryName,
-                status: item.status || "",
-                teamA: item.eventInfo?.teamA || "",
-                teamB: item.eventInfo?.teamB || "",
-                teamAFlag: teamALogo,
-                teamBFlag: teamBLogo,
-                startTime: item.eventInfo?.startTime || ""
-              };
-            });
+        } catch (err) {
+          console.error(`Cloudflare: Error fetching Live Sports HD channels from ${url}:`, err);
         }
-      } catch (err) {
-        console.error("Cloudflare: Error fetching Football HD Zone channels:", err);
       }
 
       // Compose combination list
       let combinedChannels = [...cricChannels, ...roarZoneChannels, ...footballHDChannels];
 
-      // 3. Fetch server 2 CricHD sources
-      let smCricChannels: any[] = [];
-      try {
-        const smResponse = await fetch(
-          "https://raw.githubusercontent.com/sm-monirulislam/CricHD-Auto-Update-Playlist/main/crichd_data.json"
-        );
-        if (smResponse.ok) {
-          const smData: any = await smResponse.json();
-          if (smData && Array.isArray(smData.response)) {
-            smCricChannels = smData.response;
-          } else if (Array.isArray(smData)) {
-            smCricChannels = smData;
-          }
-        }
-      } catch (err) {
-        console.error("Cloudflare: Error fetching SM CricHD channels:", err);
-      }
-
-      // 4. Fetch server 2 AynaOTT sources
-      let aynaChannels: any[] = [];
-      try {
-        const aynaResponse = await fetch(
-          "https://raw.githubusercontent.com/sm-monirulislam/AynaOTT-auto-update-playlist/refs/heads/main/AynaOTT.json"
-        );
-        if (aynaResponse.ok) {
-          const aynaData: any = await aynaResponse.json();
-          if (aynaData && Array.isArray(aynaData)) {
-            aynaChannels = aynaData;
-          } else if (aynaData && Array.isArray(aynaData.response)) {
-            aynaChannels = aynaData.response;
-          }
-        }
-      } catch (err) {
-        console.error("Cloudflare: Error fetching AynaOTT channels:", err);
-      }
+      // 3. (Removed CricHD and AynaOTT playlists as requested)
+      const smCricChannels: any[] = [];
+      const aynaChannels: any[] = [];
 
       // 5. Fetch Toffee auto-updating channels
       let toffeeChannels: any[] = [];
