@@ -649,7 +649,8 @@ export async function onRequest(context: { request: Request; env: any; params: a
                 absoluteUri = baseUrl + rawUri + finalUrlObj.search;
               }
             }
-            const proxiedUri = `/api/hls/chunk.ts?url=${encodeURIComponent(absoluteUri)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${suffix}`;
+            const isPlaylist = absoluteUri.includes(".m3u8");
+            const proxiedUri = `${isPlaylist ? "/api/hls/stream.m3u8" : "/api/hls/chunk.ts"}?url=${encodeURIComponent(absoluteUri)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${suffix}`;
             modifiedLine = line.replace(rawUri, proxiedUri);
           }
           return modifiedLine;
