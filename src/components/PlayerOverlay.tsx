@@ -73,8 +73,10 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       // ignore
     }
 
-    // If the browser page is HTTPS and the stream is HTTP, or if it requires custom headers, or has custom ports, we must force the proxy
-    const shouldForceProxy = (isHttpsPage && isHttpStream) || hasCustomHeaders || hasCustomPort;
+    // We only force proxy if the stream requires custom headers (which browser native player cannot do directly).
+    // For normal HTTP-on-HTTPS or custom port streams, we try to play DIRECTLY first (so users in Bangladesh can use their local IP to bypass regional blockades).
+    // If direct play fails, the HLS error handler will automatically fall back to Proxy play!
+    const shouldForceProxy = hasCustomHeaders;
     const activeUseProxy = useProxy || shouldForceProxy;
 
     let url = rawUrl;
@@ -454,9 +456,8 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       {channel.urls.length > 0 && (
         <div
           id="server-list"
-          className={`absolute bottom-[15px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]
-            ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}
-          `}
+          className="absolute bottom-[15px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center items-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]"
+          style={{ opacity: showUI ? 1 : 0, transform: showUI ? 'translate(-50%, 0)' : 'translate(-50%, 12px)', pointerEvents: showUI ? 'auto' : 'none' }}
         >
           {channel.urls.map((url, idx) => {
             const isActive = idx === currentUrlIndex;
@@ -475,6 +476,25 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
               </button>
             );
           })}
+
+          {/* Proxy Mode Toggle Button */}
+          <button
+            tabIndex={1}
+            onClick={() => {
+              setPlaybackError(null);
+              setUseProxy((prev) => !prev);
+            }}
+            className={`nav-item px-[12px] py-[6px] rounded-[6px] text-xs font-bold cursor-pointer outline-none select-none border transition-all duration-300 flex items-center gap-1.5
+              hover:scale-105
+              ${useProxy 
+                ? 'bg-amber-500 text-black border-amber-400 hover:bg-amber-400 hover:shadow-[0_0_10px_rgba(245,158,11,0.5)]' 
+                : 'bg-[#222] text-gray-300 border-[#333] hover:bg-[#333] hover:text-white'
+              }
+            `}
+            title={useProxy ? "Proxy Mode is Active (Routing through Cloud Run proxy). Click to play directly (bypasses region blocks)." : "Direct Mode is Active (Bypasses proxy). Click to route through Proxy (bypasses mixed content blocks)."}
+          >
+            <span>{useProxy ? "🛡️ Proxy Active" : "⚡ Direct Active"}</span>
+          </button>
         </div>
       )}
     </div>
