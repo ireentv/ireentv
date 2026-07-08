@@ -157,7 +157,10 @@ async function startServer() {
               if (queryCookie) {
                 proxyQuery += `&cookie=${encodeURIComponent(queryCookie)}`;
               }
-              return `/api/proxy?${proxyQuery}`;
+              const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+              const host = req.headers.host;
+              const proxyOrigin = `${protocol}://${host}`;
+              return `${proxyOrigin}/api/proxy?${proxyQuery}`;
             } catch (e) {
               return rawUrl;
             }

@@ -99,7 +99,7 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         const isCloudflarePages = hostname.includes('.pages.dev') || 
           (!hostname.includes('run.app') && !hostname.includes('localhost') && !hostname.includes('127.0.0.1'));
         
-        if (isCloudflarePages) {
+        if (isCloudflarePages && hasCustomPort) {
           customProxyBase = 'https://ais-pre-lba6jarckqdljkk2qw6the-361905524472.asia-southeast1.run.app';
         }
       }

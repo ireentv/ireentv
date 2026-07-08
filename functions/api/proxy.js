@@ -20,15 +20,30 @@ export async function onRequest(context) {
     return new Response("Missing target url parameter", { status: 400 });
   }
 
-  // If a custom backend proxy environment variable is configured in Cloudflare Pages,
-  // forward the request to that backend (e.g. your Cloud Run backend) to bypass Cloudflare's non-standard port block.
-  // We use the Google AI Studio Cloud Run backend URL as the default fallback to ensure instant compatibility.
+  // Detect if the target URL uses a custom port (non-standard ports other than 80 or 443)
+  let hasCustomPort = false;
+  try {
+    const parsedTarget = new URL(targetUrl);
+    if (parsedTarget.port && parsedTarget.port !== "80" && parsedTarget.port !== "443") {
+      hasCustomPort = true;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // To prevent country-blocking issues (e.g., Bangladesh local channels blocking foreign IPs like Google Cloud/Singapore),
+  // we ONLY forward requests to the Cloud Run proxy if:
+  // 1. The user has explicitly configured the PROXY_BACKEND_URL environment variable in Cloudflare, OR
+  // 2. The stream requires a custom port which Cloudflare Workers are known to block, and we fallback to the default Cloud Run proxy.
+  // Otherwise, standard port streams are proxied DIRECTLY by the Cloudflare Worker closest to the user (e.g., in Bangladesh) to bypass regional blockades.
+  const hasExplicitBackend = !!context.env?.PROXY_BACKEND_URL;
   const proxyBackendUrl = context.env?.PROXY_BACKEND_URL || "https://ais-pre-lba6jarckqdljkk2qw6the-361905524472.asia-southeast1.run.app";
 
-  if (proxyBackendUrl) {
+  if (proxyBackendUrl && (hasExplicitBackend || hasCustomPort)) {
     try {
       const targetBackend = `${proxyBackendUrl.replace(/\/$/, "")}/api/proxy?${requestUrl.searchParams.toString()}`;
       const headers = new Headers(request.headers);
+      headers.delete("host");
       
       const backendResponse = await fetch(targetBackend, {
         method: request.method,
@@ -173,7 +188,8 @@ export async function onRequest(context) {
             if (cookie) {
               proxyQuery += `&cookie=${encodeURIComponent(cookie)}`;
             }
-            return `/api/proxy?${proxyQuery}`;
+            const proxyOrigin = new URL(request.url).origin;
+            return `${proxyOrigin}/api/proxy?${proxyQuery}`;
           } catch (e) {
             return rawUrl;
           }
