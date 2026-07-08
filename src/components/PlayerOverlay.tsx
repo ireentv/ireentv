@@ -73,10 +73,10 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       // ignore
     }
 
-    // We only force proxy if the stream requires custom headers (which browser native player cannot do directly).
-    // For normal HTTP-on-HTTPS or custom port streams, we try to play DIRECTLY first (so users in Bangladesh can use their local IP to bypass regional blockades).
-    // If direct play fails, the HLS error handler will automatically fall back to Proxy play!
-    const shouldForceProxy = hasCustomHeaders;
+    // If the page is loaded over HTTPS and the stream is insecure HTTP, we MUST use the proxy to bypass Mixed Content Block.
+    // Since our Service Worker acts as a client-side local proxy, this will still run from the user's local internet (e.g., Bangladesh IP),
+    // bypassing regional blockades while maintaining full compliance with browser security!
+    const shouldForceProxy = (isHttpsPage && isHttpStream) || hasCustomHeaders;
     const activeUseProxy = useProxy || shouldForceProxy;
 
     let url = rawUrl;

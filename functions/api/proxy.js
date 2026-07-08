@@ -120,6 +120,28 @@ export async function onRequest(context) {
     }
 
     if (!response.ok) {
+      // If direct fetch from Cloudflare fails (like 403 Forbidden for wrong country),
+      // we fall back to the secure Cloud Run proxy to serve the stream data!
+      if (proxyBackendUrl && !hasExplicitBackend && !hasCustomPort) {
+        try {
+          const targetBackend = `${proxyBackendUrl.replace(/\/$/, "")}/api/proxy?${requestUrl.searchParams.toString()}`;
+          const headers = new Headers(request.headers);
+          headers.delete("host");
+          
+          const backendResponse = await fetch(targetBackend, {
+            method: request.method,
+            headers: headers
+          });
+
+          return new Response(backendResponse.body, {
+            status: backendResponse.status,
+            headers: backendResponse.headers
+          });
+        } catch (backendErr) {
+          console.error("Backup Cloud Run proxy failed:", backendErr);
+        }
+      }
+
       return new Response(`Failed to proxy URL: ${response.statusText}`, { status: response.status });
     }
 
