@@ -1,19 +1,10 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { Readable } from "stream";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // Enable CORS preflight for all endpoints
-  app.options("*", (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.sendStatus(204);
-  });
 
   // API Proxy Route to bypass CORS and Mixed Content (HTTP on HTTPS pages) blocking
   app.get("/api/proxy", async (req, res) => {
@@ -26,41 +17,23 @@ async function startServer() {
       const decodedUrl = targetUrl;
       const incomingRange = req.headers.range;
 
-      const queryReferer = (req.query.referer || req.headers["x-referer"] || "") as string;
-      const queryUA = (req.query.userAgent || req.headers["x-user-agent"] || "") as string;
-      const queryCookie = (req.query.cookie || "") as string;
-
       let currentUrl = decodedUrl;
       let response;
       let redirectCount = 0;
       const maxRedirects = 5;
 
       while (redirectCount < maxRedirects) {
-        let safeOrigin = "http://www.fawanews.sc";
-        if (queryReferer) {
-          try {
-            safeOrigin = new URL(queryReferer).origin;
-          } catch (e) {
-            try {
-              safeOrigin = new URL("http://" + queryReferer).origin;
-            } catch (err) {
-              // fallback stays
-            }
-          }
-        }
-
         // Fetch the insecure or cross-origin stream/media/playlist with custom headers to bypass streaming blocks
         const requestHeaders: Record<string, string> = {
-          "User-Agent": queryUA || "oxoo/1.3.9.d (Linux;Android 7.1.2) ExoPlayerLib/2.14.1",
-          "Referer": queryReferer || "http://www.fawanews.sc/",
-          "Origin": safeOrigin,
+          "User-Agent": "oxoo/1.3.9.d (Linux;Android 7.1.2) ExoPlayerLib/2.14.1",
+          "Referer": "http://www.fawanews.sc/",
+          "Origin": "http://www.fawanews.sc",
           "Accept": "*/*",
           "Connection": "keep-alive"
         };
 
-        if (queryCookie) {
-          requestHeaders["Cookie"] = queryCookie;
-        } else if (currentUrl.includes("toffeelive.com")) {
+        // If the stream is from Toffee (toffeelive.com), add the specific cookie required for authorization
+        if (currentUrl.includes("toffeelive.com")) {
           requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
         }
 
@@ -123,13 +96,9 @@ async function startServer() {
               const parentUrlObj = new URL(decodedUrl);
               const resolvedUrlObj = new URL(rawUrl, decodedUrl);
 
-              // Copy parent query parameters (like tokens) to the segments if they are not already present
-              const parentParams = parentUrlObj.searchParams;
-              const resolvedParams = resolvedUrlObj.searchParams;
-              for (const [key, value] of parentParams.entries()) {
-                if (!resolvedParams.has(key)) {
-                  resolvedParams.set(key, value);
-                }
+              // Copy parent query parameters (like tokens) to the segments if they don't have search parameters
+              if (resolvedUrlObj.search === "" && parentUrlObj.search !== "") {
+                resolvedUrlObj.search = parentUrlObj.search;
               }
 
               let resolvedUrl = resolvedUrlObj.href;
@@ -147,20 +116,7 @@ async function startServer() {
                 }
               }
 
-              let proxyQuery = `url=${encodeURIComponent(resolvedUrl)}`;
-              if (queryReferer) {
-                proxyQuery += `&referer=${encodeURIComponent(queryReferer)}`;
-              }
-              if (queryUA) {
-                proxyQuery += `&userAgent=${encodeURIComponent(queryUA)}`;
-              }
-              if (queryCookie) {
-                proxyQuery += `&cookie=${encodeURIComponent(queryCookie)}`;
-              }
-              const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
-              const host = req.headers.host;
-              const proxyOrigin = `${protocol}://${host}`;
-              return `${proxyOrigin}/api/proxy?${proxyQuery}`;
+              return `/api/proxy?url=${encodeURIComponent(resolvedUrl)}`;
             } catch (e) {
               return rawUrl;
             }
@@ -206,13 +162,10 @@ async function startServer() {
         res.setHeader("Content-Length", contentLength);
       }
 
-      // Stream the response body directly to prevent buffer delays and latency on low-speed internet
-      if (response.body) {
-        const nodeStream = Readable.fromWeb(response.body as any);
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
+      // Read as buffer and send to browser
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      return res.send(buffer);
 
     } catch (error: any) {
       console.error("Proxy error for URL:", targetUrl, error);

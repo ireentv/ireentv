@@ -14,30 +14,19 @@ export function normalizeChannelName(name: string): string {
     .trim();
 }
 
-export interface M3UChannel {
-  name: string;
-  logo: string;
-  category: string;
-  url: string;
-  headers?: Record<string, string>;
-}
-
-export function parseM3U(data: string): Array<M3UChannel> {
+export function parseM3U(data: string): Array<{ name: string; logo: string; category: string; url: string }> {
   const lines = data.split('\n');
-  const channels: Array<M3UChannel> = [];
+  const channels: Array<{ name: string; logo: string; category: string; url: string }> = [];
 
   let lastLogo = "https://via.placeholder.com/400x120/111111/00ffcc.png?text=TV";
   let lastCategory = "Others";
   let lastName = "Unknown Channel";
-  let currentHeaders: Record<string, string> = {};
 
   lines.forEach(line => {
     line = line.trim();
     if (line === '') return;
 
     if (line.startsWith('#EXTINF')) {
-      currentHeaders = {};
-
       const logoMatch = line.match(/tvg-logo="([^"]+)"/);
       if (logoMatch) {
         lastLogo = logoMatch[1];
@@ -52,52 +41,23 @@ export function parseM3U(data: string): Array<M3UChannel> {
         lastCategory = "Others";
       }
 
-      const uaMatch = line.match(/http-user-agent="([^"]+)"/i);
-      if (uaMatch) currentHeaders['User-Agent'] = uaMatch[1];
-
-      const refMatch = line.match(/http-referrer="([^"]+)"/i) || line.match(/http-referer="([^"]+)"/i);
-      if (refMatch) currentHeaders['Referer'] = refMatch[1];
-
       const nameIndex = line.lastIndexOf(',');
       if (nameIndex !== -1) {
         lastName = line.substring(nameIndex + 1).trim() || "Unknown Channel";
-      }
-    } else if (line.startsWith('#EXTVLCOPT:')) {
-      const opt = line.substring('#EXTVLCOPT:'.length).trim();
-      if (opt.startsWith('http-user-agent=')) {
-        currentHeaders['User-Agent'] = opt.substring('http-user-agent='.length).trim();
-      } else if (opt.startsWith('http-referrer=')) {
-        currentHeaders['Referer'] = opt.substring('http-referrer='.length).trim();
-      } else if (opt.startsWith('http-referer=')) {
-        currentHeaders['Referer'] = opt.substring('http-referer='.length).trim();
-      }
-    } else if (line.startsWith('#EXTHTTP:')) {
-      const httpStr = line.substring('#EXTHTTP:'.length).trim();
-      try {
-        const httpObj = JSON.parse(httpStr);
-        if (httpObj.cookie) currentHeaders['Cookie'] = httpObj.cookie;
-        if (httpObj['User-Agent']) currentHeaders['User-Agent'] = httpObj['User-Agent'];
-        if (httpObj['user-agent']) currentHeaders['User-Agent'] = httpObj['user-agent'];
-        if (httpObj['Referer']) currentHeaders['Referer'] = httpObj['Referer'];
-        if (httpObj['referer']) currentHeaders['Referer'] = httpObj['referer'];
-      } catch (e) {
-        console.error('Failed to parse EXTHTTP JSON:', httpStr, e);
       }
     } else if (!line.startsWith('#')) {
       channels.push({
         name: lastName,
         logo: lastLogo,
         category: lastCategory,
-        url: line,
-        headers: Object.keys(currentHeaders).length > 0 ? { ...currentHeaders } : undefined
+        url: line
       });
-      currentHeaders = {};
     }
   });
   return channels;
 }
 
-export async function fetchAndParseM3U(url: string): Promise<Array<M3UChannel>> {
+export async function fetchAndParseM3U(url: string): Promise<Array<{ name: string; logo: string; category: string; url: string }>> {
   try {
     const noCacheUrl = `${url}?t=${new Date().getTime()}`;
     const response = await fetch(noCacheUrl);
@@ -111,7 +71,7 @@ export async function fetchAndParseM3U(url: string): Promise<Array<M3UChannel>> 
 }
 
 export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'All'>, string[]> = {
-  Sports: ['sport', 'cricket', 'football', 'fifa', 'wwe', 'ten', 'star sports', 'tsports', 'ptv', 'willow', 'bein', 'espn', 'sky', 'sports'],
+  Sports: ['sport', 'cricket', 'football', 'fifa', 'wwe', 'star sports', 'tsports', 'willow', 'bein', 'espn', 'sony ten', 'ten sports', 'ten 1', 'ten 2', 'ten 3', 'ten 5', 'ten hd', 'ten sd', 'tensports', 'sky sports', 'sky-sports', 'skysports', 'ptv sports', 'ptvsports'],
   Bangla: ['bangla', 'bengali', 'bd', 'somoy', 'jamuna', 'ekattor', 'ntv', 'rtv', 'atn', 'channel i', 'toffee', 'dhaka', 'bteb', 'gazi', 'dipto', 'independent', 'boishakhi'],
   Hindi: ['hindi', 'india', 'star plus', 'colors', 'zee tv', 'sony entertainment', 'sony sab', 'and tv', 'bindass', 'mtv india', 'hum', 'set india'],
   Movie: ['movie', 'cinema', 'film', 'star gold', 'zee cinema', 'sony max', 'hbo', 'cine', 'action', 'thrills', 'hollywood', 'bollywood', 'blockbuster'],

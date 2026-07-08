@@ -1,18 +1,5 @@
 export async function onRequest(context) {
   const { request } = context;
-
-  // Handle CORS preflight immediately
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*"
-      }
-    });
-  }
-
   const requestUrl = new URL(request.url);
   const targetUrl = requestUrl.searchParams.get("url");
 
@@ -20,88 +7,35 @@ export async function onRequest(context) {
     return new Response("Missing target url parameter", { status: 400 });
   }
 
-  // Detect if the target URL uses a custom port (non-standard ports other than 80 or 443)
-  let hasCustomPort = false;
   try {
-    const parsedTarget = new URL(targetUrl);
-    if (parsedTarget.port && parsedTarget.port !== "80" && parsedTarget.port !== "443") {
-      hasCustomPort = true;
-    }
-  } catch (e) {
-    // ignore
-  }
-
-  // To prevent country-blocking issues (e.g., Bangladesh local channels blocking foreign IPs like Google Cloud/Singapore),
-  // we ONLY forward requests to the Cloud Run proxy if:
-  // 1. The user has explicitly configured the PROXY_BACKEND_URL environment variable in Cloudflare, OR
-  // 2. The stream requires a custom port which Cloudflare Workers are known to block, and we fallback to the default Cloud Run proxy.
-  // Otherwise, standard port streams are proxied DIRECTLY by the Cloudflare Worker closest to the user (e.g., in Bangladesh) to bypass regional blockades.
-  const hasExplicitBackend = !!context.env?.PROXY_BACKEND_URL;
-  const proxyBackendUrl = context.env?.PROXY_BACKEND_URL || "https://ais-pre-lba6jarckqdljkk2qw6the-361905524472.asia-southeast1.run.app";
-
-  if (proxyBackendUrl && (hasExplicitBackend || hasCustomPort)) {
-    try {
-      const targetBackend = `${proxyBackendUrl.replace(/\/$/, "")}/api/proxy?${requestUrl.searchParams.toString()}`;
-      const headers = new Headers(request.headers);
-      headers.delete("host");
-      
-      const backendResponse = await fetch(targetBackend, {
-        method: request.method,
-        headers: headers
-      });
-
-      return new Response(backendResponse.body, {
-        status: backendResponse.status,
-        headers: backendResponse.headers
-      });
-    } catch (e) {
-      console.error("Failed to forward request to proxy backend:", e);
-      // Fallback to direct fetching if backend proxy fails
-    }
-  }
-
-  try {
-    const referer = requestUrl.searchParams.get("referer");
-    const userAgent = requestUrl.searchParams.get("userAgent");
-    const cookie = requestUrl.searchParams.get("cookie");
+    const decodedUrl = targetUrl;
     const incomingRange = request.headers.get("range");
 
-    let currentUrl = targetUrl;
+    let currentUrl = decodedUrl;
     let response;
     let redirectCount = 0;
     const maxRedirects = 5;
 
     while (redirectCount < maxRedirects) {
-      let safeOrigin = "http://www.fawanews.sc";
-      if (referer) {
-        try {
-          safeOrigin = new URL(referer).origin;
-        } catch (e) {
-          try {
-            safeOrigin = new URL("http://" + referer).origin;
-          } catch (err) {
-            // fallback stays
-          }
-        }
-      }
-
+      // Construct headers to match the node server and forward authorization
       const requestHeaders = {
-        "User-Agent": userAgent || "oxoo/1.3.9.d (Linux;Android 7.1.2) ExoPlayerLib/2.14.1",
-        "Referer": referer || "http://www.fawanews.sc/",
-        "Origin": safeOrigin,
+        "User-Agent": "oxoo/1.3.9.d (Linux;Android 7.1.2) ExoPlayerLib/2.14.1",
+        "Referer": "http://www.fawanews.sc/",
+        "Origin": "http://www.fawanews.sc",
         "Accept": "*/*"
       };
 
-      if (cookie) {
-        requestHeaders["Cookie"] = cookie;
-      } else if (currentUrl.includes("toffeelive.com")) {
+      // Apply Toffee authentication cookie if target is Toffee
+      if (currentUrl.includes("toffeelive.com")) {
         requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
       }
 
+      // Forward incoming Range headers if present (essential for streaming media seek/buffer)
       if (incomingRange) {
         requestHeaders["Range"] = incomingRange;
       }
 
+      // Fetch with redirect: "manual" to prevent the platform from stripping authorization/cookie headers on cross-origin redirects
       response = await fetch(currentUrl, {
         headers: requestHeaders,
         redirect: "manual"
@@ -112,6 +46,7 @@ export async function onRequest(context) {
         if (!location) {
           break;
         }
+        // Resolve relative redirect URLs against the current active URL
         currentUrl = new URL(location, currentUrl).href;
         redirectCount++;
       } else {
@@ -120,28 +55,6 @@ export async function onRequest(context) {
     }
 
     if (!response.ok) {
-      // If direct fetch from Cloudflare fails (like 403 Forbidden for wrong country),
-      // we fall back to the secure Cloud Run proxy to serve the stream data!
-      if (proxyBackendUrl && !hasExplicitBackend && !hasCustomPort) {
-        try {
-          const targetBackend = `${proxyBackendUrl.replace(/\/$/, "")}/api/proxy?${requestUrl.searchParams.toString()}`;
-          const headers = new Headers(request.headers);
-          headers.delete("host");
-          
-          const backendResponse = await fetch(targetBackend, {
-            method: request.method,
-            headers: headers
-          });
-
-          return new Response(backendResponse.body, {
-            status: backendResponse.status,
-            headers: backendResponse.headers
-          });
-        } catch (backendErr) {
-          console.error("Backup Cloud Run proxy failed:", backendErr);
-        }
-      }
-
       return new Response(`Failed to proxy URL: ${response.statusText}`, { status: response.status });
     }
 
@@ -152,7 +65,7 @@ export async function onRequest(context) {
     };
 
     const contentType = response.headers.get("content-type") || "";
-    const lowerUrl = targetUrl.toLowerCase();
+    const lowerUrl = decodedUrl.toLowerCase();
 
     // Check if this is an HLS playlist (M3U8)
     if (
@@ -163,7 +76,7 @@ export async function onRequest(context) {
     ) {
       const playlistText = await response.text();
 
-      // Rewrite relative URLs and absolute HTTP URLs inside the playlist to go through our Cloudflare proxy
+      // Rewrite relative URLs and absolute HTTP URLs inside the playlist to go through our secure proxy
       const lines = playlistText.split("\n");
       const rewrittenLines = lines.map((line) => {
         const trimmed = line.trim();
@@ -173,24 +86,18 @@ export async function onRequest(context) {
 
         const proxyUrl = (rawUrl) => {
           try {
-            const parentUrlObj = new URL(targetUrl);
-            const resolvedUrlObj = new URL(rawUrl, targetUrl);
+            const parentUrlObj = new URL(decodedUrl);
+            const resolvedUrlObj = new URL(rawUrl, decodedUrl);
 
-            // Copy parent query parameters (like tokens) to the segments if they are not already present
-            const parentParams = parentUrlObj.searchParams;
-            const resolvedParams = resolvedUrlObj.searchParams;
-            for (const [key, value] of parentParams.entries()) {
-              if (!resolvedParams.has(key)) {
-                resolvedParams.set(key, value);
-              }
+            if (resolvedUrlObj.search === "" && parentUrlObj.search !== "") {
+              resolvedUrlObj.search = parentUrlObj.search;
             }
 
             let resolvedUrl = resolvedUrlObj.href;
 
-            // Preserve double-slashes if the parent URL path includes double slashes (e.g. :8097//Somoy-TV)
-            if (targetUrl.includes("://") && targetUrl.split("://")[1].includes("//")) {
-              const protocol = targetUrl.split("://")[0];
-              const restOfParent = targetUrl.split("://")[1];
+            if (decodedUrl.includes("://") && decodedUrl.split("://")[1].includes("//")) {
+              const protocol = decodedUrl.split("://")[0];
+              const restOfParent = decodedUrl.split("://")[1];
               const hostPart = restOfParent.split("/")[0];
 
               const singleSlashPrefix = `${protocol}://${hostPart}/`;
@@ -200,18 +107,7 @@ export async function onRequest(context) {
               }
             }
 
-            let proxyQuery = `url=${encodeURIComponent(resolvedUrl)}`;
-            if (referer) {
-              proxyQuery += `&referer=${encodeURIComponent(referer)}`;
-            }
-            if (userAgent) {
-              proxyQuery += `&userAgent=${encodeURIComponent(userAgent)}`;
-            }
-            if (cookie) {
-              proxyQuery += `&cookie=${encodeURIComponent(cookie)}`;
-            }
-            const proxyOrigin = new URL(request.url).origin;
-            return `${proxyOrigin}/api/proxy?${proxyQuery}`;
+            return `/api/proxy?url=${encodeURIComponent(resolvedUrl)}`;
           } catch (e) {
             return rawUrl;
           }
@@ -232,23 +128,23 @@ export async function onRequest(context) {
         return proxyUrl(trimmed);
       });
 
-      const responseHeaders = {
-        ...corsHeaders,
-        "Content-Type": "application/vnd.apple.mpegurl"
-      };
-
       return new Response(rewrittenLines.join("\n"), {
-        status: 200,
-        headers: responseHeaders
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/vnd.apple.mpegurl"
+        }
       });
     }
 
     // For TS / fMP4 video segments or other file streams, transfer directly
     const responseHeaders = {
-      ...corsHeaders,
-      "Content-Type": contentType || "video/mp2t"
+      ...corsHeaders
     };
+    if (contentType) {
+      responseHeaders["Content-Type"] = contentType;
+    }
 
+    // Copy range response headers if present (essential for partial content delivery)
     const contentRange = response.headers.get("Content-Range");
     if (contentRange) {
       responseHeaders["Content-Range"] = contentRange;

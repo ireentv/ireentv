@@ -16,7 +16,6 @@ import CategoryBar from './components/CategoryBar.tsx';
 import ChannelCard from './components/ChannelCard.tsx';
 import PlayerOverlay from './components/PlayerOverlay.tsx';
 import DownloadModal from './components/DownloadModal.tsx';
-import SettingsModal from './components/SettingsModal.tsx';
 
 export default function App() {
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
@@ -35,7 +34,6 @@ export default function App() {
   // PWA and Download App states
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -75,19 +73,12 @@ export default function App() {
           if (!existing.urls.includes(ch.url)) {
             existing.urls.push(ch.url);
           }
-          if (ch.headers) {
-            if (!existing.headers) {
-              existing.headers = {};
-            }
-            existing.headers[ch.url] = ch.headers;
-          }
         } else {
           consolidatedMap.set(key, {
             name: ch.name,
             logo: ch.logo,
             category: ch.category,
             urls: [ch.url],
-            headers: ch.headers ? { [ch.url]: ch.headers } : undefined,
           });
         }
       });
@@ -253,8 +244,20 @@ export default function App() {
         onRefresh={() => loadChannels(true)}
         isRefreshing={isRefreshing}
         onDownloadApp={() => setShowDownloadModal(true)}
-        onOpenSettings={() => setShowSettingsModal(true)}
       />
+
+      {/* Marquee Ticker Banner */}
+      <div className="w-full bg-[#0a0a0a] border-y border-[#161616] py-3 overflow-hidden marquee-container relative z-10 flex items-center">
+        <div className="absolute left-0 top-0 bottom-0 px-4 bg-red-600/90 text-white font-black text-xs md:text-sm flex items-center gap-2 z-20 shadow-[5px_0_15px_rgba(0,0,0,0.5)]">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-white animate-ping" />
+          <span>ঘোষণা</span>
+        </div>
+        <div className="w-full pl-[95px] md:pl-[110px] overflow-hidden whitespace-nowrap">
+          <div className="marquee-text text-sm md:text-base font-bold text-gray-200 tracking-wide select-none">
+            🌎 ফিফা বিশ্বকাপ বা যে কোন খেলা এখন <span className="text-[#00ffcc] font-black">IreenTV</span> তে দেখুন। &nbsp;&nbsp;&nbsp;&nbsp;🏏 ক্রিকেট লাইভ দেখুন <span className="text-[#00ffcc] font-black">IreenTV</span> তে। &nbsp;&nbsp;&nbsp;&nbsp;📺 জনপ্রিয় হিন্দি বাংলা সেরা সব চেনেল দেখতে এখনই ডাউনলোড করুন <span className="text-[#00ffcc] font-black">IreenTV</span>। <span className="text-gray-400 font-mono">Mobile, PC and Smart TV</span>
+          </div>
+        </div>
+      </div>
 
       {/* Main Container */}
       <main className="flex-1 px-[15px] sm:px-[25px] md:px-[40px] xl:px-[60px] py-[30px] w-full max-w-full mx-auto">
@@ -405,11 +408,6 @@ export default function App() {
         deferredPrompt={deferredPrompt}
         onInstallSuccess={() => setDeferredPrompt(null)}
       />
-
-      {/* Custom Proxy Settings Modal */}
-      {showSettingsModal && (
-        <SettingsModal onClose={() => setShowSettingsModal(false)} />
-      )}
     </div>
   );
 }

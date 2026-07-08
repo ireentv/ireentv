@@ -3,7 +3,6 @@ export interface Channel {
   logo: string;
   category: string;
   urls: string[];
-  headers?: Record<string, Record<string, string>>;
 }
 
 export type CategoryType =
