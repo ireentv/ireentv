@@ -27,24 +27,10 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
 
   // TV remote control index focus
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-
-  // PWA and Download App states
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
 
   // Method to fetch all streams in parallel, consolidate duplicate names as redundant servers
   const loadChannels = async (isRef = false) => {
@@ -243,7 +229,7 @@ export default function App() {
       <Header
         onRefresh={() => loadChannels(true)}
         isRefreshing={isRefreshing}
-        onDownloadApp={() => setShowDownloadModal(true)}
+        onDownloadClick={() => setShowDownloadModal(true)}
       />
 
       {/* Marquee Ticker Banner */}
@@ -254,7 +240,7 @@ export default function App() {
         </div>
         <div className="w-full pl-[95px] md:pl-[110px] overflow-hidden whitespace-nowrap">
           <div className="marquee-text text-sm md:text-base font-bold text-gray-200 tracking-wide select-none">
-            🌎 ফিফা বিশ্বকাপ বা যে কোন খেলা এখন <span className="text-[#00ffcc] font-black">IreenTV</span> তে দেখুন। &nbsp;&nbsp;&nbsp;&nbsp;🏏 ক্রিকেট লাইভ দেখুন <span className="text-[#00ffcc] font-black">IreenTV</span> তে। &nbsp;&nbsp;&nbsp;&nbsp;📺 জনপ্রিয় হিন্দি বাংলা সেরা সব চেনেল দেখতে এখনই ডাউনলোড করুন <span className="text-[#00ffcc] font-black">IreenTV</span>। <span className="text-gray-400 font-mono">Mobile, PC and Smart TV</span>
+            ⚠️ ওয়েবসাইটে কিছু চ্যানেল প্লে হতে সমস্যা হয় তাই আপনার পছন্দের চ্যানেলটি দেখতে <span className="text-[#00ffcc] font-black">download</span> করুন <span className="text-[#00ffcc] font-black">IreenTV</span> মোবাইল অ্যাপস
           </div>
         </div>
       </div>
@@ -401,12 +387,10 @@ export default function App() {
         </p>
       </footer>
 
-      {/* Download and Installation Modal */}
+      {/* Download apps modal popup */}
       <DownloadModal
         isOpen={showDownloadModal}
         onClose={() => setShowDownloadModal(false)}
-        deferredPrompt={deferredPrompt}
-        onInstallSuccess={() => setDeferredPrompt(null)}
       />
     </div>
   );

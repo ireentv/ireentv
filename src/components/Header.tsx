@@ -3,10 +3,10 @@ import { RefreshCw, Download } from 'lucide-react';
 interface HeaderProps {
   onRefresh: () => void;
   isRefreshing: boolean;
-  onDownloadApp: () => void;
+  onDownloadClick: () => void;
 }
 
-export default function Header({ onRefresh, isRefreshing, onDownloadApp }: HeaderProps) {
+export default function Header({ onRefresh, isRefreshing, onDownloadClick }: HeaderProps) {
   return (
     <header className="bg-[#050505] px-[20px] sm:px-[30px] py-[15px] border-b border-[#1a1a1a] shadow-[0_4px_15px_rgba(0,0,0,0.9)] sticky top-0 z-50 flex justify-between items-center gap-4">
       <h1 className="rgb-text text-[20px] sm:text-[26px] font-black uppercase tracking-[2px] select-none">
@@ -14,7 +14,7 @@ export default function Header({ onRefresh, isRefreshing, onDownloadApp }: Heade
       </h1>
       <div className="flex items-center gap-2 sm:gap-3">
         <button
-          onClick={onDownloadApp}
+          onClick={onDownloadClick}
           className="bg-[#00ffcc]/15 text-[#00ffcc] border border-[#00ffcc]/40 px-[12px] sm:px-[18px] py-[8px] rounded-[6px] text-xs sm:text-[15px] font-bold cursor-pointer outline-none flex items-center gap-1.5 sm:gap-2 hover:bg-[#00ffcc] hover:text-black hover:border-white hover:shadow-[0_0_15px_#00ffcc] hover:scale-105 active:scale-95 select-none transition-all duration-300"
         >
           <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
