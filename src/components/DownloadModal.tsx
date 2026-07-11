@@ -41,7 +41,7 @@ export default function DownloadModal({ isOpen, onClose }: DownloadModalProps) {
         <div className="space-y-4">
           {/* Mobile App Button */}
           <a
-            href="https://github.com/ireentv/Ireen-TV-Mobile/raw/refs/heads/main/IreenTV%20Mobile.apk"
+            href="https://github.com/ireentv/IreenTV-Mobile-Apps/raw/refs/heads/main/IreenTV%20Mobile.apk"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-4 w-full bg-[#111] hover:bg-[#00ffcc] text-white hover:text-black border border-[#222] hover:border-white p-4 rounded-xl text-left font-bold cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(0,255,204,0.3)] group select-none outline-none"
@@ -57,7 +57,7 @@ export default function DownloadModal({ isOpen, onClose }: DownloadModalProps) {
 
           {/* Android TV App Button */}
           <a
-            href="https://github.com/ireentv/Smart-TV/raw/refs/heads/main/Smart%20TV%20HD.apk"
+            href="https://github.com/ireentv/Smart-TV-Apps/raw/refs/heads/main/Smart%20TV%20HD.apk"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-4 w-full bg-[#111] hover:bg-[#00ffcc] text-white hover:text-black border border-[#222] hover:border-white p-4 rounded-xl text-left font-bold cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(0,255,204,0.3)] group select-none outline-none"
