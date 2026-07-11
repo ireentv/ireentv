@@ -17,6 +17,28 @@ import ChannelCard from './components/ChannelCard.tsx';
 import PlayerOverlay from './components/PlayerOverlay.tsx';
 import DownloadModal from './components/DownloadModal.tsx';
 
+function SuggestedChannelLogo({ logo, name }: { logo?: string; name: string }) {
+  const [hasError, setHasError] = useState(false);
+
+  if (!logo || hasError) {
+    return (
+      <span className="text-xs text-gray-400 font-black tracking-widest select-none">
+        {name.substring(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={logo}
+      alt={name}
+      referrerPolicy="no-referrer"
+      className="w-full h-full object-contain object-center scale-95 group-hover:scale-105 transition-transform duration-300"
+      onError={() => setHasError(true)}
+    />
+  );
+}
+
 export default function App() {
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
   const [filteredChannels, setFilteredChannels] = useState<Channel[]>([]);
@@ -42,15 +64,51 @@ export default function App() {
     setErrorText(null);
 
     try {
-      const [sonyLiv, tapmad, toffee, defaultLive] = await Promise.all([
+      const [sonyLiv, tapmad, toffee, toffeeChannelsRes] = await Promise.all([
         fetchAndParseM3U(PRIORITY_URL_1),
         fetchAndParseM3U(PRIORITY_URL_2),
         fetchAndParseM3U(TOFFEE_URL),
-        fetchAndParseM3U(DEFAULT_URL),
+        fetch(`${DEFAULT_URL}?t=${new Date().getTime()}`).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
 
+      const toffeeChannels = toffeeChannelsRes?.channels || [];
+
+      // Find first valid Toffee channel with headers in the new playlist to use as a fallback cookie source
+      const firstValidToffeeChan = toffeeChannels.find(
+        (tfChan: any) => tfChan && tfChan.headers && tfChan.headers.cookie
+      );
+
+      // 1. Process Toffee channels from the JSON data, decorate them with dynamic cookies & headers
+      const decoratedToffeeChannels = toffeeChannels.map((tfChan: any) => {
+        const headers = tfChan.headers || {};
+        const cookieVal = headers.cookie || firstValidToffeeChan?.headers?.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1780846724:KeyName=prod_linear:Signature=qw1ZBDwKDO8cVUbNd8jIak3w3SjFHXu9q8jtfYBaxB5gi-Dce5fdVUOykuYyY-8W6P3Xzhoq_CGU3YvIjfkvDg";
+        const uaVal = headers["user-agent"] || headers.User_Agent || firstValidToffeeChan?.headers?.["user-agent"] || "Mozilla/5.0 (Linux; Android 14; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+        const hostVal = headers.Host || firstValidToffeeChan?.headers?.Host || "bldcmprod-cdn.toffeelive.com";
+
+        try {
+          const urlObj = new URL(tfChan.link);
+          urlObj.searchParams.set("cookie", cookieVal);
+          urlObj.searchParams.set("user-agent", uaVal);
+          urlObj.searchParams.set("host", hostVal);
+          return {
+            name: tfChan.name,
+            logo: tfChan.logo || "",
+            category: tfChan.category_name || "Others",
+            url: urlObj.toString(),
+          };
+        } catch (urlErr) {
+          return {
+            name: tfChan.name,
+            logo: tfChan.logo || "",
+            category: tfChan.category_name || "Others",
+            url: tfChan.link,
+          };
+        }
+      });
+
+      // 2. Keep the three M3U playlists completely clean, untouched and independent (no cross-pollution of headers/cookies)
       const consolidatedMap = new Map<string, Channel>();
-      const combined = [...sonyLiv, ...tapmad, ...toffee, ...defaultLive];
+      const combined = [...sonyLiv, ...tapmad, ...toffee, ...decoratedToffeeChannels];
 
       combined.forEach((ch) => {
         const key = normalizeChannelName(ch.name);
@@ -288,22 +346,7 @@ export default function App() {
                   >
                     {/* Channel Logo */}
                     <div className="w-[50px] h-[35px] bg-black/85 rounded flex items-center justify-center overflow-hidden border border-[#222] shrink-0 group-hover:border-[#00ffcc]/30">
-                      {ch.logo ? (
-                        <img
-                          src={ch.logo}
-                          alt={ch.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-contain object-center scale-95 group-hover:scale-105 transition-transform duration-300"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = '';
-                            (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="text-xs text-gray-500 font-black tracking-widest">${ch.name.substring(0, 2).toUpperCase()}</span>`;
-                          }}
-                        />
-                      ) : (
-                        <span className="text-xs text-gray-500 font-black tracking-widest">
-                          {ch.name.substring(0, 2).toUpperCase()}
-                        </span>
-                      )}
+                      <SuggestedChannelLogo logo={ch.logo} name={ch.name} />
                     </div>
                     {/* Channel Meta */}
                     <div className="flex-1 min-w-0">
