@@ -100,8 +100,17 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
 
     setIsLoading(true);
 
+    const removeEventListeners = () => {
+      videoElement.removeEventListener('playing', handlePlaying);
+      videoElement.removeEventListener('waiting', handleWaiting);
+      videoElement.removeEventListener('loadstart', handleLoadStart);
+      videoElement.removeEventListener('canplay', handleCanPlay);
+      videoElement.removeEventListener('error', handleNativeError);
+    };
+
     const triggerFailover = (errorMessage: string) => {
       stopWatchdog();
+      removeEventListeners();
       const nextIndex = (currentUrlIndex + 1) % channel.urls.length;
       if (channel.urls.length > 1 && !attemptedIndicesRef.current.has(nextIndex)) {
         attemptedIndicesRef.current.add(nextIndex);
