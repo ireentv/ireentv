@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { X, Tv, Maximize, Minimize } from 'lucide-react';
+import { X, Tv } from 'lucide-react';
 import { Channel } from '../types';
 
 interface PlayerOverlayProps {
@@ -22,7 +22,6 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
   const [showUI, setShowUI] = useState(true);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [reloadToggle, setReloadToggle] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Reset current URL index when the channel changes
   useEffect(() => {
@@ -38,40 +37,6 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       watchdogTimeoutRef.current = null;
     }
   }, [channel]);
-
-  // Listen to fullscreen changes to update state
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-    };
-  }, []);
-
-  const toggleFullscreen = (e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-    }
-    if (!overlayRef.current) return;
-
-    if (!document.fullscreenElement) {
-      overlayRef.current.requestFullscreen().catch((err) => {
-        console.error(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else {
-      document.exitFullscreen().catch((err) => {
-        console.error(`Error attempting to exit fullscreen: ${err.message}`);
-      });
-    }
-  };
 
   const handleServerSelect = (idx: number) => {
     if (idx === currentUrlIndex) return;
@@ -421,9 +386,7 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       onMouseMove={triggerUIReset}
       onTouchStart={triggerUIReset}
       onClick={triggerUIReset}
-      className={`relative bg-black flex flex-col justify-center items-center overflow-hidden border border-[#222] shadow-2xl animate-fade-in cursor-pointer transition-all duration-300
-        ${isFullscreen ? 'w-full h-full rounded-none border-none' : 'w-full aspect-video rounded-2xl'}
-      `}
+      className="relative w-full aspect-video bg-black flex flex-col justify-center items-center overflow-hidden rounded-2xl border border-[#222] shadow-2xl animate-fade-in cursor-pointer"
     >
       {/* Custom Video Loader */}
       {(isLoading || playbackError) && (
@@ -447,21 +410,6 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         </div>
       )}
 
-      {/* Fullscreen Toggle Button (Top Right, shifted left) */}
-      <button
-        id="fullscreen-btn"
-        tabIndex={1}
-        onClick={toggleFullscreen}
-        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-        className={`nav-item absolute top-[15px] right-[65px] bg-black/85 text-[#00ffcc] border border-[#222] rounded-full w-[40px] h-[40px] text-[18px] cursor-pointer flex justify-center items-center outline-none transition-all duration-300 z-[12] select-none
-          hover:bg-[#00ffcc] hover:text-black hover:scale-110 hover:shadow-[0_0_12px_#00ffcc] hover:border-white
-          focus:bg-[#00ffcc] focus:text-black focus:scale-110 focus:shadow-[0_0_12px_#00ffcc] focus:border-white
-          ${(showUI || isLoading || playbackError) ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-3 pointer-events-none'}
-        `}
-      >
-        {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-      </button>
-
       {/* Close Channel Button (Top Right) */}
       <button
         id="close-btn"
@@ -482,14 +430,15 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         ref={videoRef}
         autoPlay
         playsInline
-        className="w-full h-full outline-none bg-black translate-z-0 will-change-transform pointer-events-none"
+        controls
+        className="w-full h-full outline-none bg-black translate-z-0 will-change-transform pointer-events-auto"
       />
 
       {/* Backup Servers Selector List */}
       {channel.urls.length > 0 && (
         <div
           id="server-list"
-          className={`absolute bottom-[15px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]
+          className={`absolute bottom-[70px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]
             ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}
           `}
         >
