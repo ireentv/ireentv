@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { X, Tv } from 'lucide-react';
+import { X, Tv, Play, Pause, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
 import { Channel } from '../types';
 
 interface PlayerOverlayProps {
@@ -22,6 +22,24 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
   const [showUI, setShowUI] = useState(true);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [reloadToggle, setReloadToggle] = useState(false);
+
+  // Custom controller states
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Sync isFullscreen with native fullscreen state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // Reset current URL index when the channel changes
   useEffect(() => {
@@ -45,6 +63,57 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
     attemptedIndicesRef.current = new Set([idx]);
     setCurrentUrlIndex(idx);
   };
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch((err) => console.warn('Play error:', err));
+    }
+    triggerUIReset();
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    videoRef.current.muted = !isMuted;
+    setIsMuted(!isMuted);
+    triggerUIReset();
+  };
+
+  const toggleFullscreen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!overlayRef.current) return;
+    if (!document.fullscreenElement) {
+      overlayRef.current.requestFullscreen().catch((err) => {
+        console.warn('Error attempting to enable fullscreen:', err);
+      });
+    } else {
+      document.exitFullscreen().catch((err) => {
+        console.warn('Error attempting to exit fullscreen:', err);
+      });
+    }
+    triggerUIReset();
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoRef.current || !duration || isNaN(duration) || !isFinite(duration)) return;
+    const newTime = parseFloat(e.target.value);
+    videoRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+    triggerUIReset();
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time) || !isFinite(time)) return '0:00';
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const isLive = !duration || !isFinite(duration) || duration === 0;
 
   // Request fullscreen and setup back/popstate history handle
   useEffect(() => {
@@ -172,6 +241,11 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
 
     const handlePlaying = () => {
       setIsLoading(false);
+      setPlaybackError(null);
+      if (errorTimeoutRef.current) {
+        window.clearTimeout(errorTimeoutRef.current);
+        errorTimeoutRef.current = null;
+      }
       stopWatchdog();
     };
     const handleWaiting = () => {
@@ -183,6 +257,11 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
     };
     const handleCanPlay = () => {
       setIsLoading(false);
+      setPlaybackError(null);
+      if (errorTimeoutRef.current) {
+        window.clearTimeout(errorTimeoutRef.current);
+        errorTimeoutRef.current = null;
+      }
       stopWatchdog();
     };
 
@@ -191,11 +270,28 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       triggerFailover('সার্ভার সংযোগ বিচ্ছিন্ন হয়েছে। অন্য সার্ভার চেষ্টা করা হচ্ছে...');
     };
 
+    const handlePlayState = () => setIsPlaying(true);
+    const handlePauseState = () => setIsPlaying(false);
+    const handleVolumeChange = () => setIsMuted(videoElement.muted);
+    const handleTimeUpdate = () => setCurrentTime(videoElement.currentTime);
+    const handleDurationChange = () => setDuration(videoElement.duration);
+
     videoElement.addEventListener('playing', handlePlaying);
     videoElement.addEventListener('waiting', handleWaiting);
     videoElement.addEventListener('loadstart', handleLoadStart);
     videoElement.addEventListener('canplay', handleCanPlay);
     videoElement.addEventListener('error', handleNativeError);
+    videoElement.addEventListener('play', handlePlayState);
+    videoElement.addEventListener('pause', handlePauseState);
+    videoElement.addEventListener('volumechange', handleVolumeChange);
+    videoElement.addEventListener('timeupdate', handleTimeUpdate);
+    videoElement.addEventListener('durationchange', handleDurationChange);
+
+    // Sync initial state
+    setIsPlaying(!videoElement.paused);
+    setIsMuted(videoElement.muted);
+    setCurrentTime(videoElement.currentTime);
+    setDuration(videoElement.duration);
 
     // Setup HLS
     if (Hls.isSupported()) {
@@ -270,6 +366,12 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       videoElement.src = url;
       const onMetadataLoaded = () => {
         videoElement.play().catch((e) => console.log('Safari playback play failed:', e));
+        setIsLoading(false);
+        setPlaybackError(null);
+        if (errorTimeoutRef.current) {
+          window.clearTimeout(errorTimeoutRef.current);
+          errorTimeoutRef.current = null;
+        }
         stopWatchdog();
       };
       videoElement.addEventListener('loadedmetadata', onMetadataLoaded);
@@ -287,6 +389,11 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       videoElement.removeEventListener('loadstart', handleLoadStart);
       videoElement.removeEventListener('canplay', handleCanPlay);
       videoElement.removeEventListener('error', handleNativeError);
+      videoElement.removeEventListener('play', handlePlayState);
+      videoElement.removeEventListener('pause', handlePauseState);
+      videoElement.removeEventListener('volumechange', handleVolumeChange);
+      videoElement.removeEventListener('timeupdate', handleTimeUpdate);
+      videoElement.removeEventListener('durationchange', handleDurationChange);
 
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -430,15 +537,14 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         ref={videoRef}
         autoPlay
         playsInline
-        controls
-        className="w-full h-full outline-none bg-black translate-z-0 will-change-transform pointer-events-auto"
+        className="w-full h-full outline-none bg-black translate-z-0 will-change-transform pointer-events-none"
       />
 
       {/* Backup Servers Selector List */}
       {channel.urls.length > 0 && (
         <div
           id="server-list"
-          className={`absolute bottom-[70px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]
+          className={`absolute bottom-[85px] left-1/2 -translate-x-1/2 flex gap-[8px] bg-black/85 px-[15px] py-[10px] rounded-[10px] border border-[#222] flex-wrap justify-center max-w-[90%] max-h-[80px] overflow-y-auto transition-all duration-500 z-[13]
             ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}
           `}
         >
@@ -461,6 +567,75 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
           })}
         </div>
       )}
+
+      {/* Custom Controller Overlay Bar */}
+      <div
+        id="controls-bar"
+        className={`absolute bottom-0 left-0 right-0 h-[65px] bg-gradient-to-t from-black via-black/90 to-transparent flex items-center justify-between px-6 z-[14] transition-all duration-500 select-none
+          ${showUI ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}
+        `}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Left Side: Play/Pause, Volume & Time */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={togglePlay}
+            className="text-white hover:text-[#00ffcc] hover:scale-110 active:scale-95 transition-all duration-200 outline-none"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white" />}
+          </button>
+
+          <button
+            onClick={toggleMute}
+            className="text-white hover:text-[#00ffcc] hover:scale-110 active:scale-95 transition-all duration-200 outline-none"
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </button>
+
+          {/* Time/Live Indicator */}
+          {!isLive ? (
+            <span className="text-white/85 text-xs font-mono font-medium select-none">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+          ) : (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-600/20 border border-red-500/30 rounded text-red-500 font-bold text-[10px] select-none animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              সরাসরি (LIVE)
+            </div>
+          )}
+        </div>
+
+        {/* Center Side: Progress bar/Seekbar (Only if not Live) */}
+        {!isLive && (
+          <div className="flex-1 mx-6 flex items-center">
+            <input
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="any"
+              value={currentTime}
+              onChange={handleSeek}
+              className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-[#00ffcc] outline-none"
+            />
+          </div>
+        )}
+
+        {/* Right Side: Fullscreen & Channel Name info */}
+        <div className="flex items-center gap-4">
+          <span className="hidden sm:inline text-[11px] font-bold text-[#00ffcc] bg-[#00ffcc]/10 border border-[#00ffcc]/20 px-2 py-1 rounded">
+            {channel.name}
+          </span>
+          <button
+            onClick={toggleFullscreen}
+            className="text-white hover:text-[#00ffcc] hover:scale-110 active:scale-95 transition-all duration-200 outline-none"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
