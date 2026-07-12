@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { X, Tv } from 'lucide-react';
+import { X, Tv, Maximize, Minimize } from 'lucide-react';
 import { Channel } from '../types';
 
 interface PlayerOverlayProps {
@@ -21,6 +21,8 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
   const [isLoading, setIsLoading] = useState(true);
   const [showUI, setShowUI] = useState(true);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [reloadToggle, setReloadToggle] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Reset current URL index when the channel changes
   useEffect(() => {
@@ -36,6 +38,40 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       watchdogTimeoutRef.current = null;
     }
   }, [channel]);
+
+  // Listen to fullscreen changes to update state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    if (!overlayRef.current) return;
+
+    if (!document.fullscreenElement) {
+      overlayRef.current.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen().catch((err) => {
+        console.error(`Error attempting to exit fullscreen: ${err.message}`);
+      });
+    }
+  };
 
   const handleServerSelect = (idx: number) => {
     if (idx === currentUrlIndex) return;
@@ -72,12 +108,44 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
 
     const videoElement = videoRef.current;
     const rawUrl = channel.urls[currentUrlIndex];
-    const url = `/api/proxy?url=${encodeURIComponent(rawUrl)}`;
+    
+    // Check if it is a decorated Toffee JSON stream (they have a "cookie" query parameter in App.tsx)
+    let isDecoratedToffee = false;
+    try {
+      const urlObj = new URL(rawUrl);
+      isDecoratedToffee = urlObj.searchParams.has('cookie');
+    } catch (e) {
+      isDecoratedToffee = false;
+    }
+    
+    // For Toffee channels decorated with dynamic query params, proxy them normally.
+    // For other clean streams, play them directly unless we are on an HTTPS page and the stream is HTTP (to prevent Mixed Content blocks).
+    let url = rawUrl;
+    if (isDecoratedToffee) {
+      url = `/api/proxy?url=${encodeURIComponent(rawUrl)}`;
+    } else {
+      const isHttpsPage = window.location.protocol === 'https:';
+      const isHttpStream = rawUrl.startsWith('http://');
+      if (isHttpsPage && isHttpStream) {
+        url = `/api/proxy?url=${encodeURIComponent(rawUrl)}&clean=true`;
+      } else {
+        url = rawUrl;
+      }
+    }
 
     setIsLoading(true);
 
+    const removeEventListeners = () => {
+      videoElement.removeEventListener('playing', handlePlaying);
+      videoElement.removeEventListener('waiting', handleWaiting);
+      videoElement.removeEventListener('loadstart', handleLoadStart);
+      videoElement.removeEventListener('canplay', handleCanPlay);
+      videoElement.removeEventListener('error', handleNativeError);
+    };
+
     const triggerFailover = (errorMessage: string) => {
       stopWatchdog();
+      removeEventListeners();
       const nextIndex = (currentUrlIndex + 1) % channel.urls.length;
       if (channel.urls.length > 1 && !attemptedIndicesRef.current.has(nextIndex)) {
         attemptedIndicesRef.current.add(nextIndex);
@@ -89,14 +157,31 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         }
         errorTimeoutRef.current = window.setTimeout(() => setPlaybackError(null), 3000);
       } else {
-        const isHttpsPage = window.location.protocol === 'https:';
-        const isHttpStream = rawUrl.startsWith('http://');
-        if (isHttpsPage && isHttpStream) {
-          setPlaybackError('MIXED_CONTENT_ERROR');
-        } else {
-          setPlaybackError(errorMessage || 'এই চ্যানেলটি এখন সম্প্রচার করা যাচ্ছে না।');
+        // All backup servers failed, or the single server failed. Let's auto-retry in 3 seconds to avoid permanent black screen freeze!
+        setPlaybackError('সার্ভার সংযোগে ত্রুটি। ৩ সেকেন্ড পর পুনরায় সংযোগের চেষ্টা করা হচ্ছে...');
+        setIsLoading(true);
+
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
         }
-        setIsLoading(false);
+        try {
+          videoElement.pause();
+          videoElement.removeAttribute('src');
+          videoElement.load();
+        } catch (e) {
+          console.warn('Video element cleanup error on failover:', e);
+        }
+
+        if (errorTimeoutRef.current) {
+          window.clearTimeout(errorTimeoutRef.current);
+        }
+        errorTimeoutRef.current = window.setTimeout(() => {
+          setPlaybackError(null);
+          attemptedIndicesRef.current = new Set([0]);
+          setCurrentUrlIndex(0);
+          setReloadToggle((prev) => !prev);
+        }, 3000);
       }
     };
 
@@ -187,6 +272,7 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       });
 
       let networkRetryCount = 0;
+      let mediaRetryCount = 0;
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           switch (data.type) {
@@ -201,7 +287,12 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               console.error('Hls media error, trying to recover...');
-              hlsInstance.recoverMediaError();
+              if (mediaRetryCount < 3) {
+                mediaRetryCount++;
+                hlsInstance.recoverMediaError();
+              } else {
+                triggerFailover('মিডিয়া ডিকোডিংয়ে সমস্যা হচ্ছে। অন্য সার্ভার চেষ্টা করা হচ্ছে...');
+              }
               break;
             default:
               console.error('Hls unrecoverable error');
@@ -250,11 +341,13 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         console.warn('Video element cleanup error:', e);
       }
     };
-  }, [channel, currentUrlIndex]);
+  }, [channel, currentUrlIndex, reloadToggle]);
 
   // UI Auto-Fade Interaction logic
   const triggerUIReset = () => {
-    setShowUI(true);
+    if (!showUI) {
+      setShowUI(true);
+    }
     if (uiTimeoutRef.current) {
       window.clearTimeout(uiTimeoutRef.current);
     }
@@ -328,24 +421,46 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
       onMouseMove={triggerUIReset}
       onTouchStart={triggerUIReset}
       onClick={triggerUIReset}
-      className="relative w-full aspect-video bg-black flex flex-col justify-center items-center overflow-hidden rounded-2xl border border-[#222] shadow-2xl animate-fade-in cursor-pointer"
+      className={`relative bg-black flex flex-col justify-center items-center overflow-hidden border border-[#222] shadow-2xl animate-fade-in cursor-pointer transition-all duration-300
+        ${isFullscreen ? 'w-full h-full rounded-none border-none' : 'w-full aspect-video rounded-2xl'}
+      `}
     >
       {/* Custom Video Loader */}
-      {isLoading && (
-        <div id="video-loader" className="absolute inset-0 bg-black z-[9] flex flex-col justify-center items-center">
+      {(isLoading || playbackError) && (
+        <div id="video-loader" className="absolute inset-0 bg-black z-[9] flex flex-col justify-center items-center p-4">
           <div className="relative w-[50px] h-[50px] rounded-full border-3 border-[rgba(0,255,204,0.1)] flex justify-center items-center mb-[15px] after:content-[''] after:absolute after:-inset-[3px] after:rounded-full after:border-3 after:border-transparent after:border-r-[#00ffcc] spin-animation filter drop-shadow-[0_0_8px_#00ffcc]">
             <div className="w-[10px] h-[10px] bg-[#00ffcc] rounded-full shadow-[0_0_12px_#00ffcc]" />
           </div>
           <div className="text-white text-[16px] font-bold mb-[3px] tracking-[0.5px] text-center select-none">
             <span className="text-[#00ffcc] drop-shadow-[0_0_10px_rgba(0,255,204,0.4)] mr-1">IreenTV</span>
-            is Loading
+            {playbackError ? 'is Reconnecting' : 'is Loading'}
           </div>
+          {playbackError && (
+            <div className="text-[#00ffcc] text-xs font-bold text-center px-4 py-2 bg-red-600/10 border border-red-500/20 rounded-lg max-w-[85%] mt-1 mb-2 animate-pulse select-none">
+              {playbackError}
+            </div>
+          )}
           <div className="text-[#00ffcc] text-[20px] leading-[10px] mb-3 blink-animation select-none">...</div>
           <div className="w-[150px] h-1 bg-[#1a1a1a] rounded-sm overflow-hidden relative">
             <div className="splash-loading-fill w-[30%] h-full bg-[#00ffcc] shadow-[0_0_10px_#00ffcc] rounded-sm absolute" />
           </div>
         </div>
       )}
+
+      {/* Fullscreen Toggle Button (Top Right, shifted left) */}
+      <button
+        id="fullscreen-btn"
+        tabIndex={1}
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+        className={`nav-item absolute top-[15px] right-[65px] bg-black/85 text-[#00ffcc] border border-[#222] rounded-full w-[40px] h-[40px] text-[18px] cursor-pointer flex justify-center items-center outline-none transition-all duration-300 z-[12] select-none
+          hover:bg-[#00ffcc] hover:text-black hover:scale-110 hover:shadow-[0_0_12px_#00ffcc] hover:border-white
+          focus:bg-[#00ffcc] focus:text-black focus:scale-110 focus:shadow-[0_0_12px_#00ffcc] focus:border-white
+          ${(showUI || isLoading || playbackError) ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-3 pointer-events-none'}
+        `}
+      >
+        {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+      </button>
 
       {/* Close Channel Button (Top Right) */}
       <button
@@ -356,7 +471,7 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         className={`nav-item absolute top-[15px] right-[15px] bg-[rgba(220,38,38,0.8)] text-white border border-transparent rounded-full w-[40px] h-[40px] text-[18px] cursor-pointer flex justify-center items-center outline-none transition-all duration-300 z-[12] select-none
           hover:bg-red-600 hover:scale-110 hover:shadow-[0_0_12px_rgba(220,38,38,0.6)] hover:border-white
           focus:bg-red-600 focus:scale-110 focus:shadow-[0_0_12px_rgba(220,38,38,0.6)] focus:border-white
-          ${showUI ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3 pointer-events-none'}
+          ${(showUI || isLoading || playbackError) ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-3 pointer-events-none'}
         `}
       >
         <X className="w-5 h-5" />
