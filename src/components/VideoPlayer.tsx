@@ -900,6 +900,36 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
 
             {/* Bottom Controls Panel */}
             <div className="flex flex-col gap-2 w-full pointer-events-auto">
+              {/* Premium Redesigned Server Selection Row (Horizontally Scrollable with Hidden Scrollbars on Mobile) */}
+              {getAvailableServers(channel).length > 1 && (
+                <div className="flex items-center gap-2 w-full">
+                  <div className="flex items-center gap-1 px-2 py-1 bg-zinc-950/80 backdrop-blur-md border border-zinc-900 rounded-lg text-[9px] sm:text-xs font-display font-bold uppercase tracking-wider text-[#E50914] shrink-0 select-none">
+                    <Tv className="w-3 h-3 text-[#E50914] animate-pulse" />
+                    <span>সার্ভার:</span>
+                  </div>
+                  <div className="flex-1 flex gap-1.5 overflow-x-auto scrollbar-none py-0.5 px-0.5 max-w-full snap-x">
+                    {getAvailableServers(channel).map((srvNum) => (
+                      <button
+                        key={srvNum}
+                        onClick={() => {
+                          setSelectedServer(srvNum);
+                          resetControlsTimeout();
+                        }}
+                        className={`px-3 py-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all rounded-lg cursor-pointer shrink-0 snap-start ${
+                          selectedServer === srvNum
+                            ? "bg-[#E50914] text-white font-bold shadow-md shadow-red-900/40"
+                            : "bg-zinc-950/85 text-zinc-400 border border-zinc-900/80 hover:text-white hover:bg-zinc-900"
+                        }`}
+                        title={`Switch to Server ${srvNum}`}
+                      >
+                        Server {srvNum}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Main controls row */}
               <div className="flex items-center justify-between bg-zinc-950/95 backdrop-blur-md border border-zinc-900 rounded-xl px-2 py-1.5 sm:px-4 sm:py-2 gap-2">
                 <div className="flex items-center gap-1.5 sm:gap-4">
                   {/* Play Button */}
@@ -1010,29 +1040,6 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
                       </AnimatePresence>
                     </div>
                   )}
-
-                   {/* Server Selection Toggle */}
-                   {getAvailableServers(channel).length > 1 && (
-                     <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
-                       {getAvailableServers(channel).map((srvNum) => (
-                         <button
-                           key={srvNum}
-                           onClick={() => {
-                             setSelectedServer(srvNum);
-                             resetControlsTimeout();
-                           }}
-                           className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                             selectedServer === srvNum
-                               ? "bg-[#E50914] text-white font-bold"
-                               : "text-zinc-400 hover:text-white"
-                           }`}
-                           title={`Switch to Server ${srvNum}`}
-                         >
-                           Sv {srvNum}
-                         </button>
-                       ))}
-                     </div>
-                   )}
 
                   {/* Connection Mode Toggle */}
                   <button
