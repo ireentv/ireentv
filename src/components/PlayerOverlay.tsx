@@ -33,7 +33,27 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
   // Sync isFullscreen with native fullscreen state
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isFs = !!document.fullscreenElement;
+      setIsFullscreen(isFs);
+      if (isFs) {
+        // Try to lock to landscape on mobile/tablet devices
+        const anyOrientation = screen.orientation as any;
+        if (anyOrientation && typeof anyOrientation.lock === 'function') {
+          anyOrientation.lock('landscape').catch((err: any) => {
+            console.warn('Orientation lock failed:', err);
+          });
+        }
+      } else {
+        // Unlock orientation
+        const anyOrientation = screen.orientation as any;
+        if (anyOrientation && typeof anyOrientation.unlock === 'function') {
+          try {
+            anyOrientation.unlock();
+          } catch (err: any) {
+            console.warn('Orientation unlock failed:', err);
+          }
+        }
+      }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
