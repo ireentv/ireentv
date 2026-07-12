@@ -1,6 +1,8 @@
 {
-  "name": "IreenTV",
-  "description": "Live TV & Sports Streaming App, optimized for Smart TVs and web browsing.",
+  "name": "Remix: CricStream LiveHD",
+  "description": "An auto-updated, permanent server-proxied CricHD live streaming TV website with custom user controls and high quality playback.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

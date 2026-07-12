@@ -48,7 +48,23 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
   const [connectionMode, setConnectionMode] = useState<"auto" | "proxy" | "direct">("auto");
   const [useProxy, setUseProxy] = useState(!isStaticMode);
   const [hasAutoFlipped, setHasAutoFlipped] = useState(false);
-  const [selectedServer, setSelectedServer] = useState<1 | 2 | 3>(1);
+  const [selectedServer, setSelectedServer] = useState<number>(1);
+
+  const getAvailableServers = useCallback((chan: Channel | null): number[] => {
+    if (!chan) return [1];
+    const available = [1];
+    let index = 2;
+    while (true) {
+      const linkKey = `link${index}`;
+      if (chan[linkKey]) {
+        available.push(index);
+        index++;
+      } else {
+        break;
+      }
+    }
+    return available;
+  }, []);
 
   const cycleConnectionMode = useCallback(() => {
     setConnectionMode((prev) => {
@@ -66,12 +82,9 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
 
   // Synchronize useProxy whenever connectionMode, channel, selectedServer, or isStaticMode changes
   useEffect(() => {
-    const activeLink = 
-      selectedServer === 3 && channel?.link3 
-        ? channel.link3 
-        : selectedServer === 2 && channel?.link2 
-        ? channel.link2 
-        : channel?.link;
+    if (!channel) return;
+    const suffix = selectedServer === 1 ? "" : String(selectedServer);
+    const activeLink = (channel[`link${suffix}`] as string) || channel.link;
 
     const isHttp = activeLink?.startsWith("http://");
 
@@ -209,29 +222,14 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
   }, []);
 
   // Construct proxied stream URL
-  const getProxiedUrl = (chan: Channel, serverNum: 1 | 2 | 3) => {
-    let streamLink = chan.link;
-    let refVal = chan.referer;
-    let origVal = chan.origin;
-    let cookieVal = chan.cookie || "";
-    let uaVal = chan.ua || "";
-    let hostVal = chan.host || "";
-
-    if (serverNum === 2) {
-      streamLink = chan.link2 || chan.link;
-      refVal = chan.referer2 || chan.referer;
-      origVal = chan.origin2 || chan.origin;
-      cookieVal = chan.cookie2 || "";
-      uaVal = chan.ua2 || "";
-      hostVal = chan.host2 || "";
-    } else if (serverNum === 3) {
-      streamLink = chan.link3 || chan.link;
-      refVal = chan.referer3 || chan.referer;
-      origVal = chan.origin3 || chan.origin;
-      cookieVal = chan.cookie3 || "";
-      uaVal = chan.ua3 || "";
-      hostVal = chan.host3 || "";
-    }
+  const getProxiedUrl = (chan: Channel, serverNum: number) => {
+    const suffix = serverNum === 1 ? "" : String(serverNum);
+    const streamLink = (chan[`link${suffix}`] as string) || chan.link;
+    const refVal = (chan[`referer${suffix}`] as string) || chan.referer;
+    const origVal = (chan[`origin${suffix}`] as string) || chan.origin;
+    const cookieVal = (chan[`cookie${suffix}`] as string) || "";
+    const uaVal = (chan[`ua${suffix}`] as string) || "";
+    const hostVal = (chan[`host${suffix}`] as string) || "";
 
     const encodedUrl = encodeURIComponent(streamLink);
     const referer = refVal ? encodeURIComponent(refVal) : "https%3A%2F%2Fexecuteandship.com%2F";
@@ -246,20 +244,18 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
 
   const tryNextServer = useCallback(() => {
     if (!channel) return false;
-    const available: number[] = [1];
-    if (channel.link2) available.push(2);
-    if (channel.link3) available.push(3);
+    const available = getAvailableServers(channel);
 
     const currentIndex = available.indexOf(selectedServer);
     if (currentIndex !== -1 && currentIndex < available.length - 1) {
-      const nextServer = available[currentIndex + 1] as 1 | 2 | 3;
+      const nextServer = available[currentIndex + 1];
       console.warn(`Server ${selectedServer} failed. Automatically falling back to Server ${nextServer}...`);
       setErrorMsg(`সার্ভার ${selectedServer} ব্যর্থ হয়েছে। সার্ভার ${nextServer}-এ অটোমেটিক রিডাইরেক্ট করা হচ্ছে...`);
       setSelectedServer(nextServer);
       return true;
     }
     return false;
-  }, [channel, selectedServer]);
+  }, [channel, selectedServer, getAvailableServers]);
 
   const initPlayer = useCallback(() => {
     if (!channel || !videoRef.current) return;
@@ -272,12 +268,9 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
     setActiveLevelIndex(0);
     setShowQualityMenu(false);
 
-    const activeLink = 
-      selectedServer === 3 && channel.link3 
-        ? channel.link3 
-        : selectedServer === 2 && channel.link2 
-        ? channel.link2 
-        : channel.link;
+    const suffix = selectedServer === 1 ? "" : String(selectedServer);
+    const activeLink = (channel[`link${suffix}`] as string) || channel.link;
+
     if (!activeLink) {
       setIsLoading(false);
       setErrorMsg("আসন্ন ম্যাচ - সম্প্রচার এখনও শুরু হয়নি। অনুগ্রহ করে ম্যাচ সূচি অনুযায়ী যথাসময়ে পুনরায় প্লে করুন।");
@@ -1018,57 +1011,28 @@ export default function VideoPlayer({ channel, isStaticMode = false, onClose }: 
                     </div>
                   )}
 
-                  {/* Server Selection Toggle */}
-                  {(channel.link2 || channel.link3) && (
-                    <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
-                      <button
-                        onClick={() => {
-                          setSelectedServer(1);
-                          resetControlsTimeout();
-                        }}
-                        className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                          selectedServer === 1
-                            ? "bg-[#E50914] text-white font-bold"
-                            : "text-zinc-400 hover:text-white"
-                        }`}
-                        title="Switch to Server 1"
-                      >
-                        Sv 1
-                      </button>
-                      {channel.link2 && (
-                        <button
-                          onClick={() => {
-                            setSelectedServer(2);
-                            resetControlsTimeout();
-                          }}
-                          className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                            selectedServer === 2
-                              ? "bg-[#E50914] text-white font-bold"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                          title="Switch to Server 2"
-                        >
-                          Sv 2
-                        </button>
-                      )}
-                      {channel.link3 && (
-                        <button
-                          onClick={() => {
-                            setSelectedServer(3);
-                            resetControlsTimeout();
-                          }}
-                          className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
-                            selectedServer === 3
-                              ? "bg-[#E50914] text-white font-bold"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                          title="Switch to Server 3"
-                        >
-                          Sv 3
-                        </button>
-                      )}
-                    </div>
-                  )}
+                   {/* Server Selection Toggle */}
+                   {getAvailableServers(channel).length > 1 && (
+                     <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
+                       {getAvailableServers(channel).map((srvNum) => (
+                         <button
+                           key={srvNum}
+                           onClick={() => {
+                             setSelectedServer(srvNum);
+                             resetControlsTimeout();
+                           }}
+                           className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-[10px] sm:text-xs font-sans font-semibold transition-all cursor-pointer ${
+                             selectedServer === srvNum
+                               ? "bg-[#E50914] text-white font-bold"
+                               : "text-zinc-400 hover:text-white"
+                           }`}
+                           title={`Switch to Server ${srvNum}`}
+                         >
+                           Sv {srvNum}
+                         </button>
+                       ))}
+                     </div>
+                   )}
 
                   {/* Connection Mode Toggle */}
                   <button

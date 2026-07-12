@@ -37,36 +37,21 @@ export async function onRequest(context: { request: Request; env: any; params: a
           const finalizeCurrentItem = () => {
             if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
               const urls = currentItem.urls;
-              currentItem.link = urls[0];
-              if (urls.length > 1) {
-                currentItem.link2 = urls[1];
-              }
-              if (urls.length > 2) {
-                currentItem.link3 = urls[2];
+              for (let u = 0; u < urls.length; u++) {
+                const num = u + 1;
+                const suffix = num === 1 ? "" : String(num);
+                currentItem[`link${suffix}`] = urls[u];
+                currentItem[`referer${suffix}`] = currentItem.optReferer || "https://executeandship.com/";
+                currentItem[`origin${suffix}`] = currentItem.optOrigin || "https://executeandship.com";
+                if (currentItem.optUa) {
+                  currentItem[`ua${suffix}`] = currentItem.optUa;
+                }
               }
 
               currentItem.id = currentItem.tvgId ? `crichd-m3u-${currentItem.tvgId}-${channelIndex}` : `crichd-m3u-${channelIndex}`;
 
               if (!currentItem.logo) {
                 currentItem.logo = "https://images.unsplash.com/photo-1540747737956-378724044453?q=80&w=200&auto=format&fit=crop";
-              }
-
-              currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
-              currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
-              if (currentItem.optUa) {
-                currentItem.ua = currentItem.optUa;
-              }
-
-              if (currentItem.link2) {
-                currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
-                currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
-                if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
-              }
-
-              if (currentItem.link3) {
-                currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
-                currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
-                if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
               }
 
               cricChannels.push(currentItem);
@@ -210,36 +195,21 @@ export async function onRequest(context: { request: Request; env: any; params: a
             const finalizeCurrentItem = () => {
               if (currentItem && currentItem.name && currentItem.urls && currentItem.urls.length > 0) {
                 const urls = currentItem.urls;
-                currentItem.link = urls[0];
-                if (urls.length > 1) {
-                  currentItem.link2 = urls[1];
-                }
-                if (urls.length > 2) {
-                  currentItem.link3 = urls[2];
+                for (let u = 0; u < urls.length; u++) {
+                  const num = u + 1;
+                  const suffix = num === 1 ? "" : String(num);
+                  currentItem[`link${suffix}`] = urls[u];
+                  currentItem[`referer${suffix}`] = currentItem.optReferer || "https://executeandship.com/";
+                  currentItem[`origin${suffix}`] = currentItem.optOrigin || "https://executeandship.com";
+                  if (currentItem.optUa) {
+                    currentItem[`ua${suffix}`] = currentItem.optUa;
+                  }
                 }
 
                 currentItem.id = currentItem.tvgId ? `football-m3u-${currentItem.tvgId}-${channelIndex}` : `football-m3u-${channelIndex}`;
 
                 if (!currentItem.logo) {
                   currentItem.logo = "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=200&auto=format&fit=crop";
-                }
-
-                currentItem.referer = currentItem.optReferer || "https://executeandship.com/";
-                currentItem.origin = currentItem.optOrigin || "https://executeandship.com";
-                if (currentItem.optUa) {
-                  currentItem.ua = currentItem.optUa;
-                }
-
-                if (currentItem.link2) {
-                  currentItem.referer2 = currentItem.optReferer || "https://executeandship.com/";
-                  currentItem.origin2 = currentItem.optOrigin || "https://executeandship.com";
-                  if (currentItem.optUa) currentItem.ua2 = currentItem.optUa;
-                }
-
-                if (currentItem.link3) {
-                  currentItem.referer3 = currentItem.optReferer || "https://executeandship.com/";
-                  currentItem.origin3 = currentItem.optOrigin || "https://executeandship.com";
-                  if (currentItem.optUa) currentItem.ua3 = currentItem.optUa;
                 }
 
                 currentItem.status = "LIVE";
