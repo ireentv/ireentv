@@ -1,132 +1,73 @@
-import { Star } from "lucide-react";
-import { Channel } from "../types";
+import { useState, useRef, useEffect } from 'react';
+import { Channel } from '../types';
 
 interface ChannelCardProps {
-  key?: string | number;
   channel: Channel;
-  isActive: boolean;
-  onSelect: () => void;
-  isFavorite: boolean;
-  onToggleFavorite: (e: any) => void;
+  onClick: () => void;
+  isFocused: boolean;
 }
 
-export default function ChannelCard({
-  channel,
-  isActive,
-  onSelect,
-  isFavorite,
-  onToggleFavorite,
-}: ChannelCardProps) {
+export default function ChannelCard({ channel, onClick, isFocused }: ChannelCardProps) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [logoSrc, setLogoSrc] = useState(channel.logo);
+  const FALLBACK_LOGO = 'https://via.placeholder.com/400x120/111111/00ffcc.png?text=TV';
+
+  // Synchronize internal logo status if the channel object changes
+  useEffect(() => {
+    setLogoSrc(channel.logo);
+  }, [channel.logo]);
+
+  useEffect(() => {
+    if (isFocused && cardRef.current) {
+      cardRef.current.focus({ preventScroll: true });
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [isFocused]);
+
+  const handleImageError = () => {
+    if (logoSrc !== FALLBACK_LOGO) {
+      setLogoSrc(FALLBACK_LOGO);
+    }
+  };
+
+  const serverCount = channel.urls.length;
+
   return (
     <div
-      id={`channel-card-${channel.id}`}
-      onClick={onSelect}
-      className={`relative group flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-all duration-300 transform select-none ${
-        isActive
-          ? "bg-blue-600/15 border-blue-500 shadow-lg shadow-blue-500/5 hover:-translate-y-0.5"
-          : "bg-[#161b22] border-slate-800/80 hover:border-blue-500/50 hover:bg-[#1c232f] hover:-translate-y-0.5"
-      }`}
+      ref={cardRef}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="channel-card group bg-black rounded-[6px] text-left cursor-pointer border border-[#1f1f1f] outline-none flex flex-col overflow-hidden relative select-none
+        hover:scale-105 hover:z-10 hover:border-white hover:shadow-[0_10px_30px_rgba(0,0,0,0.9)]
+        focus:scale-105 focus:z-10 focus:border-white focus:shadow-[0_10px_30px_rgba(0,0,0,0.9)]"
     >
-      <div className="flex items-center gap-3.5 min-w-0">
-        {/* Channel Logo Frame */}
-        <div className="relative w-11 h-11 bg-slate-950 rounded-lg p-1.5 flex items-center justify-center shrink-0 border border-slate-800 group-hover:border-slate-700 overflow-hidden">
-          {channel.logo ? (
-            <img
-              src={channel.logo}
-              alt={channel.name}
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                // If logo fails to load, replace with clean text block fallback
-                const target = e.target as HTMLImageElement;
-                target.style.display = "none";
-                const fallback = target.nextSibling as HTMLDivElement;
-                if (fallback) fallback.style.display = "flex";
-              }}
-              className="max-w-full max-h-full object-contain filter drop-shadow-sm transition-transform duration-300 group-hover:scale-105"
-            />
-          ) : null}
-          <div
-            className="hidden absolute inset-0 bg-slate-800 text-slate-300 font-bold text-xs items-center justify-center font-sans tracking-wide"
-            style={{ display: channel.logo ? "none" : "flex" }}
-          >
-            {channel.name.slice(0, 2).toUpperCase()}
-          </div>
-        </div>
-
-        {/* Channel Title & Stream Label */}
-        <div className="min-w-0 flex-1">
-          <h4
-            className={`font-sans font-semibold text-sm truncate transition-colors ${
-              isActive ? "text-blue-400 font-bold" : "text-slate-200 group-hover:text-blue-400"
-            }`}
-          >
-            {channel.name}
-          </h4>
-
-          {channel.isFootballHDZone && (channel.teamA || channel.teamB) && (
-            <div className="flex items-center gap-2 mt-1 text-xs text-slate-300">
-              {channel.teamAFlag && (
-                <img 
-                  src={channel.teamAFlag} 
-                  alt="" 
-                  className="w-4 h-4 object-contain rounded-sm bg-black/10" 
-                  referrerPolicy="no-referrer" 
-                  onError={(e) => { (e.target as any).style.display = "none"; }}
-                />
-              )}
-              <span className="truncate max-w-[80px] font-medium">{channel.teamA || "Team A"}</span>
-              <span className="text-slate-500 font-bold text-[9px] uppercase tracking-wider">VS</span>
-              {channel.teamBFlag && (
-                <img 
-                  src={channel.teamBFlag} 
-                  alt="" 
-                  className="w-4 h-4 object-contain rounded-sm bg-black/10" 
-                  referrerPolicy="no-referrer" 
-                  onError={(e) => { (e.target as any).style.display = "none"; }}
-                />
-              )}
-              <span className="truncate max-w-[80px] font-medium">{channel.teamB || "Team B"}</span>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-green-500 shadow-[0_0_8px_#22c55e] animate-pulse" : "bg-slate-600"}`}></span>
-            
-            {channel.isFootballHDZone && channel.status ? (
-              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
-                channel.status.toLowerCase() === "live" 
-                  ? "bg-red-500/25 text-red-400 border border-red-500/30" 
-                  : "bg-amber-500/25 text-amber-400 border border-amber-500/30"
-              }`}>
-                {channel.status}
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">
-                {isActive ? "হালনাগাদ লাইভ" : "অনলাইন"}
-              </span>
-            )}
-
-            {channel.isFootballHDZone && channel.startTime && (
-              <span className="text-[9px] font-mono text-zinc-400 bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800/40 truncate max-w-[140px]">
-                🕒 {channel.startTime}
-              </span>
-            )}
-          </div>
-        </div>
+      <div className="w-full h-[135px] bg-[#050505] flex justify-center items-center p-[10px] box-border border-b border-[#111] overflow-hidden">
+        <img
+          src={logoSrc}
+          alt={channel.name}
+          onError={handleImageError}
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-110 group-focus:scale-110"
+        />
       </div>
 
-      {/* Favorite Ribbon Star */}
-      <button
-        onClick={onToggleFavorite}
-        className={`p-2 rounded-lg transition-all border shrink-0 ${
-          isFavorite
-            ? "text-yellow-400 bg-yellow-400/10 border-yellow-400/20 hover:scale-110"
-            : "text-slate-500 bg-transparent border-transparent hover:text-yellow-400 hover:bg-slate-800 hover:border-slate-700 hover:scale-110"
-        }`}
-        title={isFavorite ? "ফেভারিট থেকে সরান" : "ফেভারিটে যোগ করুন"}
-      >
-        <Star className={`w-4 h-4 ${isFavorite ? "fill-yellow-400" : ""}`} />
-      </button>
+      <div className="p-3 bg-black flex items-center justify-between transition-colors duration-300 group-hover:bg-[#00ffcc] group-focus:bg-[#00ffcc]">
+        <div className="text-[14px] font-medium text-white truncate flex-grow group-hover:text-black group-hover:font-bold group-focus:text-black group-focus:font-bold" title={channel.name}>
+          {channel.name}
+        </div>
+        {serverCount > 1 && (
+          <span className="text-[10px] text-[#888] ml-2 bg-[#1a1a1a] px-1.5 py-0.5 rounded-sm whitespace-nowrap transition-colors duration-300 group-hover:text-black group-hover:bg-black/15 group-hover:font-bold group-focus:text-black group-focus:bg-black/15 group-focus:font-bold">
+            {serverCount} Srv
+          </span>
+        )}
+      </div>
     </div>
   );
 }

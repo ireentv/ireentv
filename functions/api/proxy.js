@@ -20,49 +20,14 @@ export async function onRequest(context) {
       // Construct headers to match the node server and forward authorization
       const requestHeaders = {
         "User-Agent": "oxoo/1.3.9.d (Linux;Android 7.1.2) ExoPlayerLib/2.14.1",
+        "Referer": "http://www.fawanews.sc/",
+        "Origin": "http://www.fawanews.sc",
         "Accept": "*/*"
       };
 
-      let fetchUrl = currentUrl;
-      try {
-        const urlObj = new URL(currentUrl);
-
-        // Use dynamic referer and origin to avoid blocking from standard streaming servers (like Akamai)
-        if (currentUrl.includes("fawanews")) {
-          requestHeaders["Referer"] = "http://www.fawanews.sc/";
-          requestHeaders["Origin"] = "http://www.fawanews.sc";
-        } else {
-          requestHeaders["Referer"] = urlObj.origin + "/";
-          requestHeaders["Origin"] = urlObj.origin;
-        }
-
-        const cookieParam = urlObj.searchParams.get("cookie");
-        const uaParam = urlObj.searchParams.get("user-agent") || urlObj.searchParams.get("User-Agent");
-        const hostParam = urlObj.searchParams.get("host") || urlObj.searchParams.get("Host");
-
-        if (cookieParam) {
-          requestHeaders["Cookie"] = cookieParam;
-          urlObj.searchParams.delete("cookie");
-        } else if (currentUrl.includes("toffeelive.com")) {
-          requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
-        }
-
-        if (uaParam) {
-          requestHeaders["User-Agent"] = uaParam;
-          urlObj.searchParams.delete("user-agent");
-          urlObj.searchParams.delete("User-Agent");
-        }
-        if (hostParam) {
-          requestHeaders["Host"] = hostParam;
-          urlObj.searchParams.delete("host");
-          urlObj.searchParams.delete("Host");
-        }
-
-        fetchUrl = urlObj.toString();
-      } catch (e) {
-        if (currentUrl.includes("toffeelive.com")) {
-          requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
-        }
+      // Apply Toffee authentication cookie if target is Toffee
+      if (currentUrl.includes("toffeelive.com")) {
+        requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
       }
 
       // Forward incoming Range headers if present (essential for streaming media seek/buffer)
@@ -71,7 +36,7 @@ export async function onRequest(context) {
       }
 
       // Fetch with redirect: "manual" to prevent the platform from stripping authorization/cookie headers on cross-origin redirects
-      response = await fetch(fetchUrl, {
+      response = await fetch(currentUrl, {
         headers: requestHeaders,
         redirect: "manual"
       });
@@ -124,21 +89,9 @@ export async function onRequest(context) {
             const parentUrlObj = new URL(decodedUrl);
             const resolvedUrlObj = new URL(rawUrl, decodedUrl);
 
-            // Always forward special headers as query parameters to child playlists and segments
-            const specialParams = ["cookie", "user-agent", "host", "User-Agent", "Host"];
-            specialParams.forEach(param => {
-              const val = parentUrlObj.searchParams.get(param);
-              if (val) {
-                resolvedUrlObj.searchParams.set(param, val);
-              }
-            });
-
-            // Also copy any other parent query parameters (like tokens) if they do not exist on the child URL
-            parentUrlObj.searchParams.forEach((val, key) => {
-              if (!resolvedUrlObj.searchParams.has(key)) {
-                resolvedUrlObj.searchParams.set(key, val);
-              }
-            });
+            if (resolvedUrlObj.search === "" && parentUrlObj.search !== "") {
+              resolvedUrlObj.search = parentUrlObj.search;
+            }
 
             let resolvedUrl = resolvedUrlObj.href;
 
