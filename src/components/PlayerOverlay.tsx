@@ -154,7 +154,8 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
         }
       };
     }
-  }, [channel, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose]);
 
   // Handle HLS stream playing
   useEffect(() => {
@@ -162,6 +163,10 @@ export default function PlayerOverlay({ channel, onClose }: PlayerOverlayProps) 
 
     const videoElement = videoRef.current;
     const rawUrl = channel.urls[currentUrlIndex];
+    if (!rawUrl) {
+      console.warn('No URL found at current index:', currentUrlIndex);
+      return;
+    }
     
     // Check if it is a decorated Toffee JSON stream (they have a "cookie" query parameter in App.tsx)
     let isDecoratedToffee = false;
