@@ -6,8 +6,8 @@ import {
   filterChannels,
   PRIORITY_URL_1,
   PRIORITY_URL_2,
-  TOFFEE_URL,
   DEFAULT_URL,
+  TOFFEE_URL,
 } from './utils';
 
 import SplashScreen from './components/SplashScreen.tsx';
