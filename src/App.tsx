@@ -81,8 +81,8 @@ export default function App() {
       // 1. Process Toffee channels from the JSON data, decorate them with dynamic cookies & headers
       const decoratedToffeeChannels = toffeeChannels.map((tfChan: any) => {
         const headers = tfChan.headers || {};
-        const cookieVal = headers.cookie || firstValidToffeeChan?.headers?.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1780846724:KeyName=prod_linear:Signature=qw1ZBDwKDO8cVUbNd8jIak3w3SjFHXu9q8jtfYBaxB5gi-Dce5fdVUOykuYyY-8W6P3Xzhoq_CGU3YvIjfkvDg";
-        const uaVal = headers["user-agent"] || headers.User_Agent || firstValidToffeeChan?.headers?.["user-agent"] || "Mozilla/5.0 (Linux; Android 14; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+        const cookieVal = headers.cookie || firstValidToffeeChan?.headers?.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1785006201:KeyName=prod_linear:Signature=cEZBXO0JRpmgfteYwzYxXFFgjvSFfg_yB3Ew_F33CB1CJjQC2vepvkCnO2GilLQTODxGkNLgGCmBmYBdbsRxCg";
+        const uaVal = headers["user-agent"] || headers.User_Agent || firstValidToffeeChan?.headers?.["user-agent"] || "Toffee (Linux;Android 14)";
         const hostVal = headers.Host || firstValidToffeeChan?.headers?.Host || "bldcmprod-cdn.toffeelive.com";
 
         try {
