@@ -55,7 +55,7 @@ async function startServer() {
             requestHeaders["Cookie"] = cookieParam;
             urlObj.searchParams.delete("cookie");
           } else if (!isClean && currentUrl.includes("toffeelive.com")) {
-            requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
+            requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1785009637:KeyName=prod_linear:Signature=I2SEXR5mjgAcXkg--cW5_6o4Mr60cdPTJquJ6sTQsmMesXdG19HbE1i449ANnMJ1SByFfTDX9sMWX-L7-KkTCQ";
           }
 
           if (uaParam) {
@@ -72,7 +72,7 @@ async function startServer() {
           fetchUrl = urlObj.toString();
         } catch (e) {
           if (!isClean && currentUrl.includes("toffeelive.com")) {
-            requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1783429674:KeyName=prod_linear:Signature=HZtNVAyK1LMOPqW7aB2jhFqujEX_UxctjdNePQiddJo50YamKsqbSJZM_ArDi45DFYq10c8W229I6TfdVwNAAg";
+            requestHeaders["Cookie"] = "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1785009637:KeyName=prod_linear:Signature=I2SEXR5mjgAcXkg--cW5_6o4Mr60cdPTJquJ6sTQsmMesXdG19HbE1i449ANnMJ1SByFfTDX9sMWX-L7-KkTCQ";
           }
         }
 
