@@ -6,8 +6,7 @@ import {
   filterChannels,
   PRIORITY_URL_1,
   PRIORITY_URL_2,
-  TOFFEE_URL,
-  DEFAULT_URL,
+  UNIFIED_URL,
 } from './utils';
 
 import SplashScreen from './components/SplashScreen.tsx';
@@ -64,51 +63,64 @@ export default function App() {
     setErrorText(null);
 
     try {
-      const [sonyLiv, tapmad, toffee, toffeeChannelsRes] = await Promise.all([
+      const [sonyLiv, tapmad, unifiedRes] = await Promise.all([
         fetchAndParseM3U(PRIORITY_URL_1),
         fetchAndParseM3U(PRIORITY_URL_2),
-        fetchAndParseM3U(TOFFEE_URL),
-        fetch(`${DEFAULT_URL}?t=${new Date().getTime()}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        fetch(`${UNIFIED_URL}?t=${new Date().getTime()}`).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
 
-      const toffeeChannels = toffeeChannelsRes?.channels || [];
+      const unifiedChannels = unifiedRes?.channels || (Array.isArray(unifiedRes) ? unifiedRes : []);
 
-      // Find first valid Toffee channel with headers in the new playlist to use as a fallback cookie source
-      const firstValidToffeeChan = toffeeChannels.find(
-        (tfChan: any) => tfChan && tfChan.headers && tfChan.headers.cookie
+      // Find first valid channel with headers in the new playlist to use as fallback cookie source if any
+      const firstValidChanWithHeaders = unifiedChannels.find(
+        (chan: any) => chan && chan.headers && chan.headers.cookie
       );
 
-      // 1. Process Toffee channels from the JSON data, decorate them with dynamic cookies & headers
-      const decoratedToffeeChannels = toffeeChannels.map((tfChan: any) => {
-        const headers = tfChan.headers || {};
-        const cookieVal = headers.cookie || firstValidToffeeChan?.headers?.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1785009637:KeyName=prod_linear:Signature=I2SEXR5mjgAcXkg--cW5_6o4Mr60cdPTJquJ6sTQsmMesXdG19HbE1i449ANnMJ1SByFfTDX9sMWX-L7-KkTCQ";
-        const uaVal = headers["user-agent"] || headers.User_Agent || firstValidToffeeChan?.headers?.["user-agent"] || "okhttp/5.1.0";
-        const hostVal = headers.Host || firstValidToffeeChan?.headers?.Host || "bldcmprod-cdn.toffeelive.com";
+      // Process channels from unified JSON playlist data
+      const decoratedUnifiedChannels = unifiedChannels.map((chan: any) => {
+        const name = chan.name || "Unknown Channel";
+        const logo = chan.logo || "";
+        const category = chan.group || chan.category_name || chan.category || "Others";
+        const rawUrl = chan.url || chan.url_raw || chan.link || "";
 
-        try {
-          const urlObj = new URL(tfChan.link);
-          urlObj.searchParams.set("cookie", cookieVal);
-          urlObj.searchParams.set("user-agent", uaVal);
-          urlObj.searchParams.set("host", hostVal);
-          return {
-            name: tfChan.name,
-            logo: tfChan.logo || "",
-            category: tfChan.category_name || "Others",
-            url: urlObj.toString(),
-          };
-        } catch (urlErr) {
-          return {
-            name: tfChan.name,
-            logo: tfChan.logo || "",
-            category: tfChan.category_name || "Others",
-            url: tfChan.link,
-          };
+        if (chan.headers || firstValidChanWithHeaders?.headers) {
+          const headers = chan.headers || {};
+          const cookieVal = headers.cookie || firstValidChanWithHeaders?.headers?.cookie || "Edge-Cache-Cookie=URLPrefix=aHR0cHM6Ly9ibGRjbXByb2QtY2RuLnRvZmZlZWxpdmUuY29t:Expires=1780846724:KeyName=prod_linear:Signature=qw1ZBDwKDO8cVUbNd8jIak3w3SjFHXu9q8jtfYBaxB5gi-Dce5fdVUOykuYyY-8W6P3Xzhoq_CGU3YvIjfkvDg";
+          const uaVal = headers["user-agent"] || headers.User_Agent || firstValidChanWithHeaders?.headers?.["user-agent"] || "Mozilla/5.0 (Linux; Android 14; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+          const hostVal = headers.Host || firstValidChanWithHeaders?.headers?.Host || "bldcmprod-cdn.toffeelive.com";
+
+          try {
+            const urlObj = new URL(rawUrl);
+            if (cookieVal) urlObj.searchParams.set("cookie", cookieVal);
+            if (uaVal) urlObj.searchParams.set("user-agent", uaVal);
+            if (hostVal) urlObj.searchParams.set("host", hostVal);
+            return {
+              name,
+              logo,
+              category,
+              url: urlObj.toString(),
+            };
+          } catch (urlErr) {
+            return {
+              name,
+              logo,
+              category,
+              url: rawUrl,
+            };
+          }
         }
+
+        return {
+          name,
+          logo,
+          category,
+          url: rawUrl,
+        };
       });
 
-      // 2. Keep the three M3U playlists completely clean, untouched and independent (no cross-pollution of headers/cookies)
+      // Combine playlists and consolidate duplicates
       const consolidatedMap = new Map<string, Channel>();
-      const combined = [...sonyLiv, ...tapmad, ...toffee, ...decoratedToffeeChannels];
+      const combined = [...sonyLiv, ...tapmad, ...decoratedUnifiedChannels];
 
       combined.forEach((ch) => {
         const key = normalizeChannelName(ch.name);

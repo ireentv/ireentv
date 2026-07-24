@@ -2,8 +2,7 @@ import { Channel, CategoryType } from './types';
 
 export const PRIORITY_URL_1 = 'https://raw.githubusercontent.com/sportlive18/Sonyliv-Playlist-Autoupdate/refs/heads/main/sonyliv.m3u';
 export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
-export const TOFFEE_URL = 'https://raw.githubusercontent.com/lotaji/playlist-vip/refs/heads/main/playlist_vip.m3u';
-export const DEFAULT_URL = 'https://raw.githubusercontent.com/ireentv/IreenTv-Auto-Update-Json-M3u-Playlist/refs/heads/main/Toffee_Playlist.json';
+export const UNIFIED_URL = 'https://raw.githubusercontent.com/sume2024/itv/refs/heads/main/unified_playlist.json';
 
 export function normalizeChannelName(name: string): string {
   if (!name) return Math.random().toString();
