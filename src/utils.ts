@@ -1,8 +1,8 @@
 import { Channel, CategoryType } from './types';
 
-export const PRIORITY_URL_1 = '#';
-export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
-export const UNIFIED_URL = 'https://raw.githubusercontent.com/sume2024/itv/refs/heads/main/unified_playlist.json';
+export const PRIORITY_URL_1 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
+export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/lotaji/playlist-vip/refs/heads/main/playlist_vip.m3u';
+export const UNIFIED_URL = '#';
 
 export function normalizeChannelName(name: string): string {
   if (!name) return Math.random().toString();
