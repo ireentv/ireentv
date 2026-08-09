@@ -76,6 +76,7 @@ export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'All'>, string[]> =
   Movie: ['movie', 'cinema', 'film', 'star gold', 'zee cinema', 'sony max', 'hbo', 'cine', 'action', 'thrills', 'hollywood', 'bollywood', 'blockbuster'],
   Music: ['music', 'song', 'mtv', 'vh1', '9xm', 'b4u', 'zoom', 'jalwa', 't-series'],
   Kids: ['kid', 'cartoon', 'nick', 'pogo', 'disney', 'anime', 'cn', 'chutti', 'discovery kids', 'baby'],
+  Entertainment: ['Entertainment', 'TV Shows', 'Series', 'Drama'],
   Documentary: ['docu', 'discover', 'nat geo', 'history', 'animal', 'science', 'wild', 'earth']
 };
 
