@@ -73,10 +73,10 @@ export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'All'>, string[]> =
   Sports: ['sport', 'cricket', 'football', 'fifa', 'wwe', 'star sports', 'tsports', 'willow', 'bein', 'espn', 'sony ten', 'ten sports', 'ten 1', 'ten 2', 'ten 3', 'ten 5', 'ten hd', 'ten sd', 'tensports', 'sky sports', 'sky-sports', 'skysports', 'ptv sports', 'ptvsports'],
   Bangla: ['bangla', 'bengali', 'bd', 'somoy', 'jamuna', 'ekattor', 'ntv', 'rtv', 'atn', 'channel i', 'toffee', 'dhaka', 'bteb', 'gazi', 'dipto', 'independent', 'boishakhi'],
   Hindi: ['hindi', 'india', 'star plus', 'colors', 'zee tv', 'sony entertainment', 'sony sab', 'and tv', 'bindass', 'mtv india', 'hum', 'set india'],
+  Entertainment: ['entertainment', 'entertain', 'drama', 'serial', 'show', 'star jalsha', 'zee bangla', 'colors bangla', 'sony pal', 'star utsav', 'dangal', 'sab', 'jalsha', 'general'],
   Movie: ['movie', 'cinema', 'film', 'star gold', 'zee cinema', 'sony max', 'hbo', 'cine', 'action', 'thrills', 'hollywood', 'bollywood', 'blockbuster'],
   Music: ['music', 'song', 'mtv', 'vh1', '9xm', 'b4u', 'zoom', 'jalwa', 't-series'],
   Kids: ['kid', 'cartoon', 'nick', 'pogo', 'disney', 'anime', 'cn', 'chutti', 'discovery kids', 'baby'],
-  Entertainment: ['Entertainment', 'TV Shows', 'Series', 'Drama'],
   Documentary: ['docu', 'discover', 'nat geo', 'history', 'animal', 'science', 'wild', 'earth']
 };
 
