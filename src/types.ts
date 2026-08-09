@@ -10,6 +10,7 @@ export type CategoryType =
   | 'Sports'
   | 'Bangla'
   | 'Hindi'
+  | 'Entertainment'
   | 'Movie'
   | 'Music'
   | 'Kids'
