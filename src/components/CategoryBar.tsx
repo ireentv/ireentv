@@ -6,6 +6,7 @@ interface CategoryBarProps {
 }
 
 const CATEGORIES: CategoryType[] = [
+  'Home',
   'All',
   'Sports',
   'Bangla',

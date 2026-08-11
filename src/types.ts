@@ -6,6 +6,7 @@ export interface Channel {
 }
 
 export type CategoryType =
+  | 'Home'
   | 'All'
   | 'Sports'
   | 'Bangla'

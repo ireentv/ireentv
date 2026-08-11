@@ -1,8 +1,8 @@
 import { Channel, CategoryType } from './types';
 
-export const PRIORITY_URL_1 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
-export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/Romancecity/channel-filter/refs/heads/main/working_playlist.m3u';
-export const UNIFIED_URL = '#';
+export const PRIORITY_URL_1 = 'https://raw.githubusercontent.com/sportlive18/Sonyliv-Playlist-Autoupdate/refs/heads/main/sonyliv.m3u';
+export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
+export const UNIFIED_URL = 'https://raw.githubusercontent.com/sume2024/itv/refs/heads/main/unified_playlist.json';
 
 export function normalizeChannelName(name: string): string {
   if (!name) return Math.random().toString();
@@ -69,7 +69,7 @@ export async function fetchAndParseM3U(url: string): Promise<Array<{ name: strin
   }
 }
 
-export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'All'>, string[]> = {
+export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'Home' | 'All'>, string[]> = {
   Sports: ['sport', 'cricket', 'football', 'fifa', 'wwe', 'star sports', 'tsports', 'willow', 'bein', 'espn', 'sony ten', 'ten sports', 'ten 1', 'ten 2', 'ten 3', 'ten 5', 'ten hd', 'ten sd', 'tensports', 'sky sports', 'sky-sports', 'skysports', 'ptv sports', 'ptvsports'],
   Bangla: ['bangla', 'bengali', 'bd', 'somoy', 'jamuna', 'ekattor', 'ntv', 'rtv', 'atn', 'channel i', 'toffee', 'dhaka', 'bteb', 'gazi', 'dipto', 'independent', 'boishakhi'],
   Hindi: ['hindi', 'india', 'star plus', 'colors', 'zee tv', 'sony entertainment', 'sony sab', 'and tv', 'bindass', 'mtv india', 'hum', 'set india'],
@@ -81,9 +81,11 @@ export const CATEGORY_KEYWORDS: Record<Exclude<CategoryType, 'All'>, string[]> =
 };
 
 export function filterChannels(channels: Channel[], category: CategoryType): Channel[] {
-  if (category === 'All') return channels;
+  if (category === 'All' || category === 'Home') return channels;
 
-  const keywords = CATEGORY_KEYWORDS[category];
+  const keywords = CATEGORY_KEYWORDS[category as Exclude<CategoryType, 'Home' | 'All'>];
+  if (!keywords) return channels;
+
   return channels.filter(c => {
     const catLower = c.category.toLowerCase();
     const nameLower = c.name.toLowerCase();

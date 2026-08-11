@@ -15,6 +15,7 @@ import CategoryBar from './components/CategoryBar.tsx';
 import ChannelCard from './components/ChannelCard.tsx';
 import PlayerOverlay from './components/PlayerOverlay.tsx';
 import DownloadModal from './components/DownloadModal.tsx';
+import NetflixHome from './components/NetflixHome.tsx';
 
 function SuggestedChannelLogo({ logo, name }: { logo?: string; name: string }) {
   const [hasError, setHasError] = useState(false);
@@ -41,7 +42,7 @@ function SuggestedChannelLogo({ logo, name }: { logo?: string; name: string }) {
 export default function App() {
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
   const [filteredChannels, setFilteredChannels] = useState<Channel[]>([]);
-  const [activeCategory, setActiveCategory] = useState<CategoryType>('All');
+  const [activeCategory, setActiveCategory] = useState<CategoryType>('Home');
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -147,7 +148,7 @@ export default function App() {
 
       setAllChannels(channelList);
       setFilteredChannels(channelList);
-      setActiveCategory('All');
+      setActiveCategory('Home');
       setFocusedIndex(-1); // Reset focus index
     } catch (err) {
       console.error('Error loading playlists:', err);
@@ -404,33 +405,44 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Responsive 5 to 10 Column Channel Cards Grid based on screen width */}
+        {/* Home Page Netflix Style View or Dynamic Category Grid */}
         {!selectedChannel && !isLoading && !errorText && (
-          <div
-            id="channel-list"
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 pb-12"
-          >
-            {filteredChannels.length === 0 ? (
-              <h3 className="text-red-500 font-bold text-center col-span-full py-8 text-lg">
-                এই ক্যাটাগরিতে কোনো চ্যানেল পাওয়া যায়নি!
-              </h3>
-            ) : (
-              filteredChannels.map((channel, index) => (
-                <div key={channel.name + index} className="contents">
-                  <ChannelCard
-                    channel={channel}
-                    isFocused={focusedIndex === index}
-                    onClick={() => {
-                      setFocusedIndex(index);
-                      setSelectedChannel(channel);
-                      // Scroll to top smoothly so player is immediately visible
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                  />
-                </div>
-              ))
-            )}
-          </div>
+          activeCategory === 'Home' ? (
+            <NetflixHome
+              allChannels={allChannels}
+              onSelectChannel={(channel) => {
+                setSelectedChannel(channel);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onSelectCategory={(cat) => setActiveCategory(cat)}
+            />
+          ) : (
+            <div
+              id="channel-list"
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 pb-12"
+            >
+              {filteredChannels.length === 0 ? (
+                <h3 className="text-red-500 font-bold text-center col-span-full py-8 text-lg">
+                  এই ক্যাটাগরিতে কোনো চ্যানেল পাওয়া যায়নি!
+                </h3>
+              ) : (
+                filteredChannels.map((channel, index) => (
+                  <div key={channel.name + index} className="contents">
+                    <ChannelCard
+                      channel={channel}
+                      isFocused={focusedIndex === index}
+                      onClick={() => {
+                        setFocusedIndex(index);
+                        setSelectedChannel(channel);
+                        // Scroll to top smoothly so player is immediately visible
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          )
         )}
       </main>
 
