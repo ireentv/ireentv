@@ -1,7 +1,7 @@
 import { Channel, CategoryType } from './types';
 
-export const PRIORITY_URL_1 = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.m3u';
-export const PRIORITY_URL_2 = 'https://raw.githubusercontent.com/Romancecity/channel-filter/refs/heads/main/working_playlist.m3u';
+export const PRIORITY_URL_1 = '#';
+export const PRIORITY_URL_2 = '#';
 export const UNIFIED_URL = '#';
 
 export function normalizeChannelName(name: string): string {
