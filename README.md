@@ -126,6 +126,7 @@ No installation required! Stream directly from any modern web browser.
 *This application operates as a media locator and visual wrapper. All video streams and links showcased inside IreenTV are publicly available across the internet. We do not host or store any video contents on our servers. For any copyright concerns, please contact the respective media host.*
 
 *আইরিন টিভি একটি মিডিয়া লোকেটর ও ভিজ্যুয়াল র্যাপার হিসেবে কাজ করে। অ্যাপে প্রদর্শিত সকল ভিডিও স্ট্রিম বা লিংক ইন্টারনেটের উন্মুক্ত উৎস হতে সংগৃহীত। আমরা আমাদের সার্ভারে কোনো ফাইল বা ভিডিও হোস্ট করি না।*
+*এই প্রজেক্টটি শুধুমাত্র প্রযুক্তিগত পরীক্ষা, অটোমেশন এবং শিক্ষামূলক (Educational) উদ্দেশ্যে তৈরি করা হয়েছে।*
 
 ---
 <p align="center">Made with ❤️ by MD ANAMUL HOQUE | Copyright © 2026 IreenTV</p>
