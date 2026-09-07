@@ -87,8 +87,10 @@ Best optimized layout for smartphone portrait & landscape layouts. High touch ta
 Optimized full-screen D-pad navigation support for Android TV, FireStick, and TV Boxes. Enjoy clean cinema views.
 * **Download APK:** [Smart TV HD.apk](https://github.com/ireentv/IreenTV-Mobile-Apps/releases/download/mobile%26tv/IreenTV.apk)
 
-### 🌐 3. Web Version
-No installation required! Stream directly from any modern web browser.
+### 🖥 3. Windows Version
+Windows 10, Windows 11 (64-bit) সহ যেকোনো পিসিতে ফুলস্ক্রিন ও বাফারিংহীন চলে।
+* **Download APK:** [IreenTV Windows.exe]([https://github.com/ireentv/IreenTV-Mobile-Apps/releases/download/mobile%26tv/IreenTV.apk](https://github.com/ireentv/IreenTV-Windows/releases/download/IreenTV-Windows/Ireen-TV-Setup-1.0.0.exe))
+
 * **Visit Site:** [ireentv.pages.dev](https://ireentvhd.pages.dev/)
 
 ---
