@@ -19,6 +19,7 @@
 <p align="center">
   <a href="#-downloads"><img src="https://img.shields.io/badge/Mobile%20App-Download%20APK-orange?style=flat-square&logo=android&logoColor=white" alt="Download Mobile APK"/></a>
   <a href="#-downloads"><img src="https://img.shields.io/badge/Smart%20TV%20App-Download%20APK-blue?style=flat-square&logo=android-tv&logoColor=white" alt="Download Smart TV APK"/></a>
+  <a href="#-downloads"><img src="https://img.shields.io/badge/Smart%20TV%20App-Download%20APK-green?style=flat-square&logo=computer&logoColor=pink" alt="Download Windows Version"/></a>
 </p>
 
 ---
@@ -89,7 +90,7 @@ Optimized full-screen D-pad navigation support for Android TV, FireStick, and TV
 
 ### 🖥 3. Windows Version
 Windows 10, Windows 11 (64-bit) সহ যেকোনো পিসিতে ফুলস্ক্রিন ও বাফারিংহীন চলে।
-* **Download APK:** [IreenTV Windows.exe](https://github.com/ireentv/IreenTV-Windows/releases/download/IreenTV-Windows/Ireen-TV-Setup-1.0.0.exe)
+* **Download EXE:** [IreenTV Windows.exe](https://github.com/ireentv/IreenTV-Windows/releases/download/IreenTV-Windows/Ireen-TV-Setup-1.0.0.exe)
 
 * **Visit Site:** [ireentv.pages.dev](https://ireentvhd.pages.dev/)
 
