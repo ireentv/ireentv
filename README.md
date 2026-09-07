@@ -19,7 +19,7 @@
 <p align="center">
   <a href="#-downloads"><img src="https://img.shields.io/badge/Mobile%20App-Download%20APK-orange?style=flat-square&logo=android&logoColor=white" alt="Download Mobile APK"/></a>
   <a href="#-downloads"><img src="https://img.shields.io/badge/Smart%20TV%20App-Download%20APK-blue?style=flat-square&logo=android-tv&logoColor=white" alt="Download Smart TV APK"/></a>
-  <a href="#-downloads"><img src="https://img.shields.io/badge/PC%20Version%20App-Download%20EXE-green?style=flat-square&logo=computer&logoColor=pink" alt="Download Windows Version"/></a>
+  <a href="#-downloads"><img src="https://img.shields.io/badge/PC%20Version-Download%20EXE-green?style=flat-square&logo=computer&logoColor=pink" alt="Download Windows Version"/></a>
 </p>
 
 ---
