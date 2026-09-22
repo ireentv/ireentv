@@ -1,7 +1,7 @@
 {
-  "versionCode": 2,
-  "versionName": "1.1.0",
-  "apkUrl": "https://github.com/Romancecity/channel-filter/releases/download/v1.1.0/IreenTV.apk",
+  "versionCode": 1,
+  "versionName": "1.0.0",
+  "apkUrl": "https://github.com/ireentv/ireentv/releases/download/v1.0.0/IreenTV.apk",
   "releaseNotes": "• নতুন স্পোর্টস ও এইচডি চ্যানেল যোগ করা হয়েছে\n• টিভি বক্স ও রিমোটের পারফরম্যান্স দ্রুত করা হয়েছে\n• নতুন প্লেয়ার অপ্টিমাইজেশন",
   "releaseDate": "2026-09-22",
   "forceUpdate": false
