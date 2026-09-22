@@ -99,7 +99,7 @@ Get the official, clean, and pre-compiled applications directly from the GitHub 
       </td>
       <td>Best optimized layout for smartphone portrait & landscape layouts. High touch target buttons and instant notifications.</td>
       <td align="center">
-        <a href="https://github.com/ireentv/IreenTV-Mobile-Apps/releases/download/mobile%26tv/IreenTV.apk">
+        <a href="https://github.com/ireentv/ireentv/releases/download/v1.0.0/IreenTV.apk">
           <img src="https://img.shields.io/badge/DOWNLOAD-Mobile%20APK-FF0055?style=for-the-badge&logo=google-play&logoColor=white" alt="Download Mobile APK"/>
         </a>
       </td>
@@ -111,7 +111,7 @@ Get the official, clean, and pre-compiled applications directly from the GitHub 
       </td>
       <td>Optimized full-screen D-pad navigation support for Android TV, FireStick, and TV Boxes. Enjoy clean cinema views.</td>
       <td align="center">
-        <a href="https://github.com/ireentv/IreenTV-Mobile-Apps/releases/download/mobile%26tv/IreenTV.apk">
+        <a href="https://github.com/ireentv/ireentv/releases/download/v1.0.0/IreenTV.apk">
           <img src="https://img.shields.io/badge/DOWNLOAD-Smart%20TV-00B4D8?style=for-the-badge&logo=apple-tv&logoColor=white" alt="Download Smart TV APK"/>
         </a>
       </td>
@@ -148,7 +148,7 @@ Get the official, clean, and pre-compiled applications directly from the GitHub 
 ## 🛠️ How to Install on Smart TV / স্মার্ট টিভিতে ইনস্টল করার নিয়ম
 
 1. **Enable Unknown Sources:** Go to your TV's `Settings` -> `Security & Restrictions` -> enable **"Unknown Sources"**.
-2. **Download APK:** Download the **[Smart TV HD.apk](https://github.com/ireentv/IreenTV-Mobile-Apps/releases/download/mobile%26tv/IreenTV.apk)** file onto a USB flash drive or use the "Downloader" app on your TV.
+2. **Download APK:** Download the **[Smart TV HD.apk](https://github.com/ireentv/ireentv/releases/download/v1.0.0/IreenTV.apk)** file onto a USB flash drive or use the "Downloader" app on your TV.
 3. **Install:** Open your TV's file explorer, select the USB drive, click on the APK, and choose **Install**.
 4. **Enjoy:** Launch IreenTV from your App Drawer and start streaming!
 
